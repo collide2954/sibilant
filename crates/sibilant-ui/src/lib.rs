@@ -1,6 +1,8 @@
 pub mod command;
 pub mod fonts;
 pub mod icons;
+#[cfg(test)]
+mod pixels;
 pub mod shell;
 mod style;
 pub mod theme;

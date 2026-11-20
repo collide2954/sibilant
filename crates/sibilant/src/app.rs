@@ -136,7 +136,7 @@ impl App {
             time_signatures: project.time_signature_map(),
         };
         let transport = transport::view(display, self.palette);
-        let tracks = track_area::view(project, self.viewport, self.palette);
+        let tracks = track_area::view(project, self.viewport, position, self.palette);
         shell::view(self.palette, transport, tracks).map(Message::Command)
     }
 

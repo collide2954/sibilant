@@ -1,9 +1,9 @@
 use iced::keyboard::Modifiers;
 use iced::widget::canvas::{self, Action, Canvas, Event, Frame, Geometry};
 use iced::{Element, Length, Point, Rectangle, Renderer, Size, Theme, mouse};
-use sibilant_core::time::TimeSignatureMap;
+use sibilant_core::time::{Musical, Position, TimeSignatureMap};
 
-use super::{Viewport, wheel};
+use super::{Viewport, draw_playhead, wheel};
 use crate::command::Command;
 use crate::fonts;
 use crate::theme::Palette;
@@ -15,6 +15,7 @@ const SHORT_LINE: f32 = HEIGHT / 3.0;
 
 struct Ruler<'a> {
     viewport: Viewport,
+    playhead: Position<Musical>,
     time_signatures: &'a TimeSignatureMap,
     palette: Palette,
 }
@@ -70,19 +71,47 @@ impl canvas::Program<Command> for Ruler<'_> {
                 });
             }
         }
+        draw_playhead(&mut frame, self.viewport, self.playhead, palette);
         vec![frame.into_geometry()]
     }
 }
 
 pub fn ruler(
     viewport: Viewport,
+    playhead: Position<Musical>,
     time_signatures: &TimeSignatureMap,
     palette: Palette,
 ) -> Element<'_, Command> {
     let ruler = Ruler {
         viewport,
+        playhead,
         time_signatures,
         palette,
     };
     Canvas::new(ruler).width(Length::Fill).height(HEIGHT).into()
+}
+
+#[cfg(test)]
+mod tests {
+    use iced::Size;
+    use sibilant_core::time::TimeSignatureMap;
+
+    use crate::pixels::Pixels;
+    use crate::theme::Palette;
+    use crate::timeline::{RULER_HEIGHT, Viewport, ruler};
+
+    #[test]
+    fn the_playhead_is_a_line_in_the_accent_color() {
+        let (viewport, palette) = (Viewport::default(), Palette::GRAPHITE);
+        let time_signatures = TimeSignatureMap::default();
+        let ruler = ruler(
+            viewport,
+            viewport.position_at(144.0),
+            &time_signatures,
+            palette,
+        );
+        let pixels = Pixels::render(ruler, Size::new(400.0, RULER_HEIGHT));
+        assert_eq!(pixels.color_at(144, 12), palette.accent);
+        assert_eq!(pixels.color_at(146, 12), palette.raised);
+    }
 }

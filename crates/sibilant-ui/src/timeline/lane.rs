@@ -2,8 +2,9 @@ use iced::keyboard::Modifiers;
 use iced::widget::canvas::{self, Action, Canvas, Event, Frame, Geometry};
 use iced::{Element, Length, Point, Rectangle, Renderer, Size, Theme, mouse};
 use sibilant_core::project::{Project, Track};
+use sibilant_core::time::{Musical, Position};
 
-use super::{Viewport, wheel};
+use super::{Viewport, draw_playhead, wheel};
 use crate::command::Command;
 use crate::theme::Palette;
 
@@ -14,6 +15,7 @@ const NAME_SIZE: f32 = 11.0;
 
 struct Lane<'a> {
     viewport: Viewport,
+    playhead: Position<Musical>,
     project: &'a Project,
     track: &'a Track,
     palette: Palette,
@@ -83,18 +85,21 @@ impl canvas::Program<Command> for Lane<'_> {
                 });
             });
         }
+        draw_playhead(&mut frame, self.viewport, self.playhead, palette);
         vec![frame.into_geometry()]
     }
 }
 
 pub fn lane<'a>(
     viewport: Viewport,
+    playhead: Position<Musical>,
     project: &'a Project,
     track: &'a Track,
     palette: Palette,
 ) -> Element<'a, Command> {
     let lane = Lane {
         viewport,
+        playhead,
         project,
         track,
         palette,
@@ -144,10 +149,13 @@ impl Viewport {
 
 #[cfg(test)]
 mod tests {
+    use iced::Size;
     use sibilant_core::project::{AudioSource, Clip, Ids, Project, Region, Track};
     use sibilant_core::time::{Duration, Musical, Position, Tempo, TempoMap};
 
-    use crate::timeline::Viewport;
+    use crate::pixels::Pixels;
+    use crate::theme::Palette;
+    use crate::timeline::{Viewport, lane};
 
     fn quarter_notes(quarter_notes: i64) -> Position<Musical> {
         Position::from_quarter_notes(quarter_notes)
@@ -210,5 +218,16 @@ mod tests {
     fn clips_outside_the_view_have_no_box() {
         let project = project_with_clips(&[100], 2, TempoMap::default());
         assert_eq!(boxes(&project, 300.0), []);
+    }
+
+    #[test]
+    fn the_playhead_is_a_line_in_the_accent_color() {
+        let (viewport, palette) = (Viewport::default(), Palette::GRAPHITE);
+        let project = Project::new(&mut Ids::default());
+        let playhead = viewport.position_at(144.0);
+        let lane = lane(viewport, playhead, &project, first_track(&project), palette);
+        let pixels = Pixels::render(lane, Size::new(400.0, 64.0));
+        assert_eq!(pixels.color_at(144, 32), palette.accent);
+        assert_eq!(pixels.color_at(146, 32), palette.background);
     }
 }

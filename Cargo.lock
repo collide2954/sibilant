@@ -2626,6 +2626,7 @@ dependencies = [
  "fontdb",
  "iced",
  "iced_test",
+ "png",
  "sibilant-core",
  "skrifa 0.44.0",
 ]

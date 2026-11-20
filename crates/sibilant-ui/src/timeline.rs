@@ -3,11 +3,12 @@ mod lane;
 mod ruler;
 
 use iced::keyboard::{self, Modifiers};
-use iced::widget::canvas::{Action, Event};
-use iced::{Rectangle, mouse};
+use iced::widget::canvas::{Action, Event, Frame};
+use iced::{Point, Rectangle, Size, mouse};
 use sibilant_core::time::{Duration, Musical, Position, TICKS_PER_QUARTER_NOTE};
 
 use crate::command::Command;
+use crate::theme::Palette;
 
 pub use grid::{BarLine, Grid};
 pub use lane::{ClipBox, lane};
@@ -30,6 +31,22 @@ fn wheel(
                 .map(|command| Action::publish(command).and_capture())
         }
         _ => None,
+    }
+}
+
+fn draw_playhead(
+    frame: &mut Frame,
+    viewport: Viewport,
+    playhead: Position<Musical>,
+    palette: Palette,
+) {
+    let size = frame.size();
+    if let Some(x) = viewport.visible_x(playhead, size.width) {
+        frame.fill_rectangle(
+            Point::new(x, 0.0),
+            Size::new(1.0, size.height),
+            iced::Color::from(palette.accent),
+        );
     }
 }
 
@@ -64,6 +81,11 @@ impl Viewport {
 
     pub fn x_of(&self, position: Position<Musical>) -> f32 {
         to_f32(self.pixels_of((position - self.start).ticks()))
+    }
+
+    pub fn visible_x(&self, position: Position<Musical>, width: f32) -> Option<f32> {
+        let x = self.x_of(position);
+        (0.0..=width).contains(&x).then_some(x)
     }
 
     pub fn width_of(&self, duration: Duration<Musical>) -> f32 {
@@ -215,6 +237,14 @@ mod tests {
             let moved = (zoomed.position_at(100.0) - under_mouse).ticks().abs();
             assert!(moved <= 1, "{steps} steps moved {moved} ticks");
         }
+    }
+
+    #[test]
+    fn a_position_is_visible_only_inside_the_view() {
+        let view = Viewport::default().scrolled(32.0);
+        assert_eq!(view.visible_x(quarter_notes(3), 300.0), Some(64.0));
+        assert_eq!(view.visible_x(quarter_notes(0), 300.0), None);
+        assert_eq!(view.visible_x(quarter_notes(20), 300.0), None);
     }
 
     #[test]

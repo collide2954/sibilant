@@ -1,6 +1,7 @@
 use iced::widget::{button, column, container, row, scrollable, space, text};
 use iced::{Border, Element, Length};
 use sibilant_core::project::{Clip, Project, Track};
+use sibilant_core::time::{Musical, Position};
 
 use crate::command::Command;
 use crate::style::filled;
@@ -19,11 +20,16 @@ const TOGGLE_SIZE: f32 = 20.0;
 const TOGGLE_SPACING: f32 = 4.0;
 const RADIUS: f32 = 4.0;
 
-pub fn view(project: &Project, viewport: Viewport, palette: Palette) -> Element<'_, Command> {
+pub fn view(
+    project: &Project,
+    viewport: Viewport,
+    playhead: Position<Musical>,
+    palette: Palette,
+) -> Element<'_, Command> {
     let rows = column(
         project
             .tracks()
-            .map(|track| track_row(project, track, viewport, palette)),
+            .map(|track| track_row(project, track, viewport, playhead, palette)),
     )
     .spacing(DIVIDER);
     let add_track = button(text("Add track").size(TEXT_SIZE))
@@ -32,7 +38,7 @@ pub fn view(project: &Project, viewport: Viewport, palette: Palette) -> Element<
         .padding(PADDING)
         .style(move |_, status| quiet(palette, status));
     let content = column![rows, scene_row(project, palette), add_track].spacing(DIVIDER);
-    let ruler = timeline::ruler(viewport, project.time_signature_map(), palette);
+    let ruler = timeline::ruler(viewport, playhead, project.time_signature_map(), palette);
     let ruler_row = row![space().width(HEADER_WIDTH), slot_spacers(project), ruler]
         .spacing(DIVIDER)
         .height(RULER_HEIGHT);
@@ -45,6 +51,7 @@ fn track_row<'a>(
     project: &'a Project,
     track: &'a Track,
     viewport: Viewport,
+    playhead: Position<Musical>,
     palette: Palette,
 ) -> Element<'a, Command> {
     let color = palette.track_color(track.color());
@@ -54,7 +61,7 @@ fn track_row<'a>(
     row![
         header(track, palette),
         row(slots).spacing(DIVIDER),
-        timeline::lane(viewport, project, track, palette)
+        timeline::lane(viewport, playhead, project, track, palette)
     ]
     .spacing(DIVIDER)
     .height(ROW_HEIGHT)
@@ -187,7 +194,7 @@ mod tests {
     use iced::{Event, Point};
     use iced_test::simulator;
     use sibilant_core::project::{AudioSource, Clip, Ids, Project, Region};
-    use sibilant_core::time::Duration;
+    use sibilant_core::time::{Duration, Position};
 
     use crate::command::Command;
     use crate::theme::Palette;
@@ -204,6 +211,7 @@ mod tests {
         let mut ui = simulator(track_area::view(
             &project,
             Viewport::default(),
+            Position::START,
             Palette::GRAPHITE,
         ));
         ui.point_at(Point::new(700.0, 60.0));
@@ -229,6 +237,7 @@ mod tests {
         let mut ui = simulator(track_area::view(
             &project,
             Viewport::default(),
+            Position::START,
             Palette::GRAPHITE,
         ));
         assert!(ui.find("Audio 1").unwrap().bounds().y >= RULER_HEIGHT);
@@ -240,6 +249,7 @@ mod tests {
         let mut ui = simulator(track_area::view(
             &project,
             Viewport::default(),
+            Position::START,
             Palette::GRAPHITE,
         ));
         let first = ui.find("Audio 1").unwrap().bounds();
@@ -253,6 +263,7 @@ mod tests {
         let mut ui = simulator(track_area::view(
             &project,
             Viewport::default(),
+            Position::START,
             Palette::GRAPHITE,
         ));
         let track = ui.find("Audio 2").unwrap().bounds();
@@ -266,6 +277,7 @@ mod tests {
         let mut ui = simulator(track_area::view(
             &project,
             Viewport::default(),
+            Position::START,
             Palette::GRAPHITE,
         ));
         ui.click("Add track").unwrap();
@@ -280,6 +292,7 @@ mod tests {
         let mut ui = simulator(track_area::view(
             &project,
             Viewport::default(),
+            Position::START,
             Palette::GRAPHITE,
         ));
         ui.click("M").unwrap();
@@ -311,6 +324,7 @@ mod tests {
         let mut ui = simulator(track_area::view(
             &project,
             Viewport::default(),
+            Position::START,
             Palette::GRAPHITE,
         ));
         assert!(ui.find("Kick").is_ok());
