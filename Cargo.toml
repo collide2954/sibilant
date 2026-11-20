@@ -11,6 +11,7 @@ repository = "https://github.com/collide2954/sibilant"
 publish = false
 
 [workspace.dependencies]
+fontdb = { version = "0.23.0", default-features = false, features = ["std"] }
 iced = { version = "0.14.0", default-features = false, features = [
     "crisp",
     "thread-pool",

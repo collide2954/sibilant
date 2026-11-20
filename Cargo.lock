@@ -2375,6 +2375,7 @@ dependencies = [
 name = "sibilant-ui"
 version = "0.0.0"
 dependencies = [
+ "fontdb",
  "iced",
  "iced_test",
 ]
