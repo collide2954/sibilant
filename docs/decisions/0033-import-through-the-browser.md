@@ -1,6 +1,6 @@
 # 0033. Bring audio files into a project through the Browser zone
 
-- Status: Accepted
+- Status: Accepted, with the preview added by [0037](0037-preview-with-a-click.md)
 - Date: 2026-11-20
 
 ## Context

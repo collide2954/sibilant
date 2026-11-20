@@ -51,3 +51,4 @@ To change a decision, write a new record. Then change the status of the old reco
 | [0034](0034-wav-files-in-a-media-crate.md) | Read WAV files in a media crate |
 | [0035](0035-clip-audio-in-memory.md) | Keep the audio of clips in memory at the output sample rate |
 | [0036](0036-fades-at-clip-edges.md) | Fade each clip edge for 4 ms |
+| [0037](0037-preview-with-a-click.md) | Preview audio files with a click in the browser |
