@@ -44,3 +44,5 @@ To change a decision, write a new record. Then change the status of the old reco
 | [0027](0027-unmaintained-crates.md) | Stop on all unmaintained crates and accept two that Iced needs |
 | [0028](0028-track-area-defaults.md) | Start with two audio tracks and give tracks palette colors |
 | [0029](0029-timeline-zoom-and-ruler.md) | Zoom the timeline with Ctrl and the wheel, and show bars and beats |
+| [0030](0030-engine-frames-and-queues.md) | Count engine time in frames and control the engine through lock-free queues |
+| [0031](0031-transport-and-metronome.md) | Return to the play start on stop, and use a synthesized metronome |
