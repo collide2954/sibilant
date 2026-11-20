@@ -50,6 +50,12 @@ impl TempoMap {
         self.segment_at(position).tempo
     }
 
+    pub fn changes(&self) -> impl ExactSizeIterator<Item = (Position<Musical>, Tempo)> {
+        self.segments
+            .iter()
+            .map(|segment| (segment.start, segment.tempo))
+    }
+
     pub fn to_clock(&self, position: Position<Musical>) -> Position<Clock> {
         let segment = self.segment_at(position);
         segment.clock_start + to_clock_duration(position - segment.start, segment.tempo)
@@ -212,6 +218,22 @@ mod tests {
         assert_eq!(map.to_clock(quarter_notes(1)), Position::from_seconds(1));
     }
 
+    #[test]
+    fn lists_each_tempo_with_the_position_where_it_starts() {
+        let map = TempoMap::new(tempo(120.0))
+            .with_tempo(quarter_notes(8), tempo(90.0))
+            .with_tempo(quarter_notes(4), tempo(60.0));
+        let changes: Vec<_> = map.changes().collect();
+        assert_eq!(
+            changes,
+            [
+                (Position::START, tempo(120.0)),
+                (quarter_notes(4), tempo(60.0)),
+                (quarter_notes(8), tempo(90.0)),
+            ]
+        );
+    }
+
     fn quarter_notes(quarter_notes: i64) -> Position<Musical> {
         Position::from_quarter_notes(quarter_notes)
     }
@@ -253,6 +275,17 @@ mod tests {
             let position = Position::<Clock>::from_superclocks(superclocks);
             let moved = (map.to_clock(map.to_musical(position)) - position).superclocks();
             prop_assert!(moved.abs() <= slowest_tick.superclocks() / 2 + 1, "moved {} superclocks", moved);
+        }
+
+        #[test]
+        fn a_map_made_again_from_its_changes_is_the_same(
+            (first, changes) in tempo_changes(),
+        ) {
+            let map = tempo_map(first, &changes);
+            let again = map
+                .changes()
+                .fold(TempoMap::new(tempo(first)), |again, (at, tempo)| again.with_tempo(at, tempo));
+            prop_assert_eq!(again, map);
         }
 
         #[test]
