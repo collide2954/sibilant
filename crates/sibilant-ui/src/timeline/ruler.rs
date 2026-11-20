@@ -1,9 +1,9 @@
 use iced::keyboard::Modifiers;
 use iced::widget::canvas::{self, Action, Canvas, Event, Frame, Geometry};
 use iced::{Element, Length, Point, Rectangle, Renderer, Size, Theme, mouse};
-use sibilant_core::time::{Musical, Position, TimeSignatureMap};
+use sibilant_core::time::TimeSignatureMap;
 
-use super::{Viewport, draw_playhead, wheel};
+use super::{View, draw_playhead, wheel};
 use crate::command::Command;
 use crate::fonts;
 use crate::theme::Palette;
@@ -14,8 +14,7 @@ const LABEL_SIZE: f32 = 11.0;
 const SHORT_LINE: f32 = HEIGHT / 3.0;
 
 struct Ruler<'a> {
-    viewport: Viewport,
-    playhead: Position<Musical>,
+    view: View,
     time_signatures: &'a TimeSignatureMap,
     palette: Palette,
 }
@@ -48,7 +47,12 @@ impl canvas::Program<Command> for Ruler<'_> {
             bounds.size(),
             iced::Color::from(palette.raised),
         );
-        for line in self.viewport.grid(self.time_signatures, bounds.width).bars {
+        for line in self
+            .view
+            .viewport
+            .grid(self.time_signatures, bounds.width)
+            .bars
+        {
             let height = if line.labeled {
                 bounds.height
             } else {
@@ -71,20 +75,18 @@ impl canvas::Program<Command> for Ruler<'_> {
                 });
             }
         }
-        draw_playhead(&mut frame, self.viewport, self.playhead, palette);
+        draw_playhead(&mut frame, self.view, palette);
         vec![frame.into_geometry()]
     }
 }
 
 pub fn ruler(
-    viewport: Viewport,
-    playhead: Position<Musical>,
+    view: View,
     time_signatures: &TimeSignatureMap,
     palette: Palette,
 ) -> Element<'_, Command> {
     let ruler = Ruler {
-        viewport,
-        playhead,
+        view,
         time_signatures,
         palette,
     };
@@ -98,18 +100,17 @@ mod tests {
 
     use crate::pixels::Pixels;
     use crate::theme::Palette;
-    use crate::timeline::{RULER_HEIGHT, Viewport, ruler};
+    use crate::timeline::{RULER_HEIGHT, View, Viewport, ruler};
 
     #[test]
     fn the_playhead_is_a_line_in_the_accent_color() {
         let (viewport, palette) = (Viewport::default(), Palette::GRAPHITE);
-        let time_signatures = TimeSignatureMap::default();
-        let ruler = ruler(
+        let view = View {
             viewport,
-            viewport.position_at(144.0),
-            &time_signatures,
-            palette,
-        );
+            playhead: viewport.position_at(144.0),
+        };
+        let time_signatures = TimeSignatureMap::default();
+        let ruler = ruler(view, &time_signatures, palette);
         let pixels = Pixels::render(ruler, Size::new(400.0, RULER_HEIGHT));
         assert_eq!(pixels.color_at(144, 12), palette.accent);
         assert_eq!(pixels.color_at(146, 12), palette.raised);

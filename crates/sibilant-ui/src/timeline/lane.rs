@@ -1,12 +1,10 @@
+use super::{View, Viewport, draw_playhead, wheel};
+use crate::command::Command;
+use crate::theme::Palette;
 use iced::keyboard::Modifiers;
 use iced::widget::canvas::{self, Action, Canvas, Event, Frame, Geometry};
 use iced::{Element, Length, Point, Rectangle, Renderer, Size, Theme, mouse};
 use sibilant_core::project::{Project, Track};
-use sibilant_core::time::{Musical, Position};
-
-use super::{Viewport, draw_playhead, wheel};
-use crate::command::Command;
-use crate::theme::Palette;
 
 const CLIP_INSET: f32 = 2.0;
 const CLIP_GAP: f32 = 1.0;
@@ -14,8 +12,7 @@ const NAME_INSET: f32 = 4.0;
 const NAME_SIZE: f32 = 11.0;
 
 struct Lane<'a> {
-    viewport: Viewport,
-    playhead: Position<Musical>,
+    view: View,
     project: &'a Project,
     track: &'a Track,
     palette: Palette,
@@ -51,6 +48,7 @@ impl canvas::Program<Command> for Lane<'_> {
             iced::Color::from(palette.background),
         );
         let grid = self
+            .view
             .viewport
             .grid(self.project.time_signature_map(), bounds.width);
         for x in grid.beats {
@@ -67,6 +65,7 @@ impl canvas::Program<Command> for Lane<'_> {
         }
         let color = palette.track_color(self.track.color());
         for clip in self
+            .view
             .viewport
             .clip_boxes(self.project, self.track, bounds.width)
         {
@@ -85,21 +84,19 @@ impl canvas::Program<Command> for Lane<'_> {
                 });
             });
         }
-        draw_playhead(&mut frame, self.viewport, self.playhead, palette);
+        draw_playhead(&mut frame, self.view, palette);
         vec![frame.into_geometry()]
     }
 }
 
 pub fn lane<'a>(
-    viewport: Viewport,
-    playhead: Position<Musical>,
+    view: View,
     project: &'a Project,
     track: &'a Track,
     palette: Palette,
 ) -> Element<'a, Command> {
     let lane = Lane {
-        viewport,
-        playhead,
+        view,
         project,
         track,
         palette,
@@ -155,7 +152,7 @@ mod tests {
 
     use crate::pixels::Pixels;
     use crate::theme::Palette;
-    use crate::timeline::{Viewport, lane};
+    use crate::timeline::{View, Viewport, lane};
 
     fn quarter_notes(quarter_notes: i64) -> Position<Musical> {
         Position::from_quarter_notes(quarter_notes)
@@ -224,8 +221,11 @@ mod tests {
     fn the_playhead_is_a_line_in_the_accent_color() {
         let (viewport, palette) = (Viewport::default(), Palette::GRAPHITE);
         let project = Project::new(&mut Ids::default());
-        let playhead = viewport.position_at(144.0);
-        let lane = lane(viewport, playhead, &project, first_track(&project), palette);
+        let view = View {
+            viewport,
+            playhead: viewport.position_at(144.0),
+        };
+        let lane = lane(view, &project, first_track(&project), palette);
         let pixels = Pixels::render(lane, Size::new(400.0, 64.0));
         assert_eq!(pixels.color_at(144, 32), palette.accent);
         assert_eq!(pixels.color_at(146, 32), palette.background);

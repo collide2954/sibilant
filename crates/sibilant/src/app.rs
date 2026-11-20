@@ -6,7 +6,7 @@ use sibilant_core::time::Position;
 use sibilant_engine::engine;
 use sibilant_ui::command::Command;
 use sibilant_ui::theme::Palette;
-use sibilant_ui::timeline::Viewport;
+use sibilant_ui::timeline::{View, Viewport};
 use sibilant_ui::transport::{self, Display};
 use sibilant_ui::{shell, track_area};
 
@@ -136,7 +136,11 @@ impl App {
             time_signatures: project.time_signature_map(),
         };
         let transport = transport::view(display, self.palette);
-        let tracks = track_area::view(project, self.viewport, position, self.palette);
+        let timeline = View {
+            viewport: self.viewport,
+            playhead: position,
+        };
+        let tracks = track_area::view(project, timeline, self.palette);
         shell::view(self.palette, transport, tracks).map(Message::Command)
     }
 

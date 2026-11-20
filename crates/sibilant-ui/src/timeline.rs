@@ -34,14 +34,24 @@ fn wheel(
     }
 }
 
-fn draw_playhead(
-    frame: &mut Frame,
-    viewport: Viewport,
-    playhead: Position<Musical>,
-    palette: Palette,
-) {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct View {
+    pub viewport: Viewport,
+    pub playhead: Position<Musical>,
+}
+
+impl Default for View {
+    fn default() -> Self {
+        Self {
+            viewport: Viewport::default(),
+            playhead: Position::START,
+        }
+    }
+}
+
+fn draw_playhead(frame: &mut Frame, view: View, palette: Palette) {
     let size = frame.size();
-    if let Some(x) = viewport.visible_x(playhead, size.width) {
+    if let Some(x) = view.viewport.visible_x(view.playhead, size.width) {
         frame.fill_rectangle(
             Point::new(x, 0.0),
             Size::new(1.0, size.height),
