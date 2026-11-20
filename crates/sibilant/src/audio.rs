@@ -1,12 +1,14 @@
 use std::fmt;
 
 use sibilant_core::project::Project;
+use sibilant_core::time::{Clock, Position};
 use sibilant_device::{DeviceError, OutputStream};
 use sibilant_engine::engine::{self, Controller};
-use sibilant_engine::timing::Timing;
+use sibilant_engine::timing::{self, Timing};
 
 pub(crate) struct Audio {
     pub(crate) controller: Controller,
+    sample_rate: u32,
     _stream: Option<OutputStream>,
 }
 
@@ -19,8 +21,13 @@ impl Audio {
             sibilant_device::start_output(&output, move |buffer| engine.process(buffer, channels))?;
         Ok(Self {
             controller,
+            sample_rate: output.sample_rate(),
             _stream: Some(stream),
         })
+    }
+
+    pub(crate) fn playhead(&self) -> Position<Clock> {
+        timing::clock_of_frame(self.sample_rate, self.controller.playhead())
     }
 
     #[cfg(test)]
@@ -31,6 +38,7 @@ impl Audio {
         let (controller, engine) = engine::new(timing(project, sample_rate));
         let audio = Self {
             controller,
+            sample_rate,
             _stream: None,
         };
         (audio, engine)

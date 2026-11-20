@@ -5,6 +5,7 @@ use crate::style::filled;
 use crate::theme::{Color, Palette};
 
 const TRANSPORT_HEIGHT: f32 = 48.0;
+const TRANSPORT_PADDING: [f32; 2] = [8.0, 12.0];
 const BROWSER_WIDTH: f32 = 240.0;
 const INSPECTOR_WIDTH: f32 = 280.0;
 const BOTTOM_HEIGHT: f32 = 240.0;
@@ -15,9 +16,12 @@ const TEXT_SIZE: f32 = 13.0;
 
 pub fn view<'a, Message: 'a>(
     palette: Palette,
+    transport: impl Into<Element<'a, Message>>,
     tracks: impl Into<Element<'a, Message>>,
 ) -> Element<'a, Message> {
-    let transport = zone(palette.raised, label(palette, "Transport")).height(TRANSPORT_HEIGHT);
+    let transport = zone(palette.raised, transport)
+        .height(TRANSPORT_HEIGHT)
+        .padding(TRANSPORT_PADDING);
     let browser = zone(palette.surface, label(palette, "Browser")).width(BROWSER_WIDTH);
     let tracks = container(tracks)
         .width(Length::Fill)
@@ -63,7 +67,11 @@ mod tests {
 
     #[test]
     fn the_window_has_the_five_zones_in_their_places() {
-        let mut ui = simulator(shell::view::<()>(Palette::GRAPHITE, text("Tracks")));
+        let mut ui = simulator(shell::view::<()>(
+            Palette::GRAPHITE,
+            text("Transport"),
+            text("Tracks"),
+        ));
         let mut bounds = |label: &str| ui.find(label).unwrap().bounds();
         let transport = bounds("Transport");
         let browser = bounds("Browser");
@@ -77,7 +85,11 @@ mod tests {
 
     #[test]
     fn the_bottom_zone_has_tabs_for_the_mixer_and_the_clip_editor() {
-        let mut ui = simulator(shell::view::<()>(Palette::GRAPHITE, text("Tracks")));
+        let mut ui = simulator(shell::view::<()>(
+            Palette::GRAPHITE,
+            text("Transport"),
+            text("Tracks"),
+        ));
         let mixer = ui.find("Mixer").unwrap().bounds();
         let editor = ui.find("Clip editor").unwrap().bounds();
         assert!(mixer.x < editor.x);

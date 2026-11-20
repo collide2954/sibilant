@@ -1,14 +1,22 @@
-use iced::{Element, Theme};
+use iced::{Element, Subscription, Theme, keyboard, window};
 use sibilant_core::history::History;
 use sibilant_core::mix::Mix;
 use sibilant_core::project::{EditError, Ids, Project, TrackId};
+use sibilant_core::time::Position;
 use sibilant_engine::engine;
 use sibilant_ui::command::Command;
 use sibilant_ui::theme::Palette;
 use sibilant_ui::timeline::Viewport;
+use sibilant_ui::transport::{self, Display};
 use sibilant_ui::{shell, track_area};
 
 use crate::audio::Audio;
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Message {
+    Command(Command),
+    Frame,
+}
 
 #[derive(Debug)]
 pub(crate) struct App {
@@ -18,6 +26,7 @@ pub(crate) struct App {
     viewport: Viewport,
     audio: Option<Audio>,
     metronome: bool,
+    playing: bool,
 }
 
 impl Default for App {
@@ -31,6 +40,7 @@ impl Default for App {
             viewport: Viewport::default(),
             audio: None,
             metronome: false,
+            playing: false,
         }
     }
 }
@@ -45,7 +55,30 @@ impl App {
         app
     }
 
-    pub(crate) fn update(&mut self, command: Command) {
+    pub(crate) fn update(&mut self, message: Message) {
+        match message {
+            Message::Command(command) => self.run(command),
+            Message::Frame => {
+                self.playing = self
+                    .audio
+                    .as_ref()
+                    .is_some_and(|audio| audio.controller.is_playing());
+            }
+        }
+    }
+
+    pub(crate) fn subscription(&self) -> Subscription<Message> {
+        let shortcuts = keyboard::listen()
+            .filter_map(Command::from_key_event)
+            .map(Message::Command);
+        if self.playing {
+            Subscription::batch([shortcuts, window::frames().map(|_| Message::Frame)])
+        } else {
+            shortcuts
+        }
+    }
+
+    fn run(&mut self, command: Command) {
         match command {
             Command::AddTrack => {
                 let id = self.ids.track();
@@ -69,8 +102,8 @@ impl App {
             Command::ZoomTimeline { steps, anchor } => {
                 self.viewport = self.viewport.zoomed(steps, anchor);
             }
-            Command::PlayOrStop => self.send(engine::Command::TogglePlay),
-            Command::Continue => self.send(engine::Command::Continue),
+            Command::PlayOrStop => self.send_transport(engine::Command::TogglePlay),
+            Command::Continue => self.send_transport(engine::Command::Continue),
             Command::ToggleMetronome => {
                 self.metronome = !self.metronome;
                 self.send(engine::Command::SetMetronome(self.metronome));
@@ -78,15 +111,33 @@ impl App {
         }
     }
 
-    fn send(&mut self, command: engine::Command) {
-        if let Some(audio) = &mut self.audio {
-            audio.controller.send(command);
+    fn send(&mut self, command: engine::Command) -> bool {
+        self.audio
+            .as_mut()
+            .is_some_and(|audio| audio.controller.send(command))
+    }
+
+    fn send_transport(&mut self, command: engine::Command) {
+        if self.send(command) {
+            self.playing = true;
         }
     }
 
-    pub(crate) fn view(&self) -> Element<'_, Command> {
-        let tracks = track_area::view(self.history.present(), self.viewport, self.palette);
-        shell::view(self.palette, tracks)
+    pub(crate) fn view(&self) -> Element<'_, Message> {
+        let project = self.history.present();
+        let clock = self.audio.as_ref().map_or(Position::START, Audio::playhead);
+        let position = project.tempo_map().to_musical(clock);
+        let display = Display {
+            playing: self.playing,
+            metronome: self.metronome,
+            position,
+            clock,
+            tempo: project.tempo_map().tempo_at(position),
+            time_signatures: project.time_signature_map(),
+        };
+        let transport = transport::view(display, self.palette);
+        let tracks = track_area::view(project, self.viewport, self.palette);
+        shell::view(self.palette, transport, tracks).map(Message::Command)
     }
 
     pub(crate) fn theme(&self) -> Theme {
@@ -121,6 +172,7 @@ mod tests {
     use sibilant_engine::engine::Engine;
     use sibilant_ui::command::Command;
 
+    use crate::app::Message;
     use crate::audio::Audio;
     use sibilant_ui::theme::Palette;
 
@@ -146,28 +198,56 @@ mod tests {
     #[test]
     fn adding_a_track_appends_the_next_audio_track() {
         let mut app = App::default();
-        app.update(Command::AddTrack);
+        run(&mut app, Command::AddTrack);
         assert_eq!(track_names(&app), ["Audio 1", "Audio 2", "Audio 3"]);
     }
 
     #[test]
     fn undo_and_redo_step_through_the_changes() {
         let mut app = App::default();
-        app.update(Command::AddTrack);
-        app.update(Command::Undo);
+        run(&mut app, Command::AddTrack);
+        run(&mut app, Command::Undo);
         assert_eq!(track_names(&app).len(), 2);
-        app.update(Command::Redo);
+        run(&mut app, Command::Redo);
         assert_eq!(track_names(&app).len(), 3);
     }
 
     #[test]
     fn a_track_added_after_an_undo_gets_a_new_id() {
         let mut app = App::default();
-        app.update(Command::AddTrack);
+        run(&mut app, Command::AddTrack);
         let undone: TrackId = project(&app).tracks().last().unwrap().id();
-        app.update(Command::Undo);
-        app.update(Command::AddTrack);
+        run(&mut app, Command::Undo);
+        run(&mut app, Command::AddTrack);
         assert_ne!(project(&app).tracks().last().unwrap().id(), undone);
+    }
+
+    fn run(app: &mut App, command: Command) {
+        app.update(Message::Command(command));
+    }
+
+    #[test]
+    fn the_transport_shows_the_playhead_of_the_engine() {
+        let (mut app, mut engine) = with_simulated_audio();
+        run(&mut app, Command::PlayOrStop);
+        engine.process(&mut vec![0.0; 96_000], 2);
+        app.update(Message::Frame);
+        let mut ui = simulator(app.view());
+        assert!(ui.find("1.3.1").is_ok());
+        assert!(ui.find("0:01.000").is_ok());
+    }
+
+    #[test]
+    fn playing_follows_the_engine_on_each_frame() {
+        let (mut app, mut engine) = with_simulated_audio();
+        run(&mut app, Command::PlayOrStop);
+        engine.process(&mut [0.0; 512], 2);
+        app.update(Message::Frame);
+        assert!(app.playing);
+        run(&mut app, Command::PlayOrStop);
+        engine.process(&mut [0.0; 512], 2);
+        app.update(Message::Frame);
+        assert!(!app.playing);
     }
 
     fn with_simulated_audio() -> (App, Engine) {
@@ -184,10 +264,10 @@ mod tests {
     #[test]
     fn play_or_stop_starts_and_stops_the_engine() {
         let (mut app, mut engine) = with_simulated_audio();
-        app.update(Command::PlayOrStop);
+        run(&mut app, Command::PlayOrStop);
         engine.process(&mut [0.0; 512], 2);
         assert!(engine_is_playing(&app));
-        app.update(Command::PlayOrStop);
+        run(&mut app, Command::PlayOrStop);
         engine.process(&mut [0.0; 512], 2);
         assert!(!engine_is_playing(&app));
     }
@@ -195,8 +275,8 @@ mod tests {
     #[test]
     fn the_metronome_button_switches_the_click_of_the_engine() {
         let (mut app, mut engine) = with_simulated_audio();
-        app.update(Command::ToggleMetronome);
-        app.update(Command::PlayOrStop);
+        run(&mut app, Command::ToggleMetronome);
+        run(&mut app, Command::PlayOrStop);
         let mut buffer = [0.0; 960];
         engine.process(&mut buffer, 2);
         assert!(app.metronome);
@@ -206,19 +286,22 @@ mod tests {
     #[test]
     fn transport_commands_without_an_audio_device_change_only_the_buttons() {
         let mut app = App::default();
-        app.update(Command::PlayOrStop);
-        app.update(Command::ToggleMetronome);
+        run(&mut app, Command::PlayOrStop);
+        run(&mut app, Command::ToggleMetronome);
         assert!(app.metronome);
     }
 
     #[test]
     fn zoom_and_scroll_change_the_view_but_not_the_undo_history() {
         let mut app = App::default();
-        app.update(Command::ZoomTimeline {
-            steps: 1.0,
-            anchor: 0.0,
-        });
-        app.update(Command::ScrollTimeline { pixels: 80.0 });
+        run(
+            &mut app,
+            Command::ZoomTimeline {
+                steps: 1.0,
+                anchor: 0.0,
+            },
+        );
+        run(&mut app, Command::ScrollTimeline { pixels: 80.0 });
         assert!((app.viewport.pixels_per_quarter_note() - 40.0).abs() < 1e-9);
         assert_eq!(app.viewport.start(), Position::from_quarter_notes(2));
         assert!(!app.history.can_undo());
@@ -228,12 +311,12 @@ mod tests {
     fn mute_and_solo_switch_the_mix_of_a_track_on_and_off() {
         let mut app = App::default();
         let track = first_track(&app).id();
-        app.update(Command::ToggleMute(track));
-        app.update(Command::ToggleSolo(track));
+        run(&mut app, Command::ToggleMute(track));
+        run(&mut app, Command::ToggleSolo(track));
         assert!(first_track(&app).mix().mute && first_track(&app).mix().solo);
-        app.update(Command::ToggleMute(track));
+        run(&mut app, Command::ToggleMute(track));
         assert!(!first_track(&app).mix().mute);
-        app.update(Command::Undo);
+        run(&mut app, Command::Undo);
         assert!(first_track(&app).mix().mute);
     }
 
@@ -250,7 +333,7 @@ mod tests {
     fn the_app_shows_the_zones_of_the_main_window() {
         let app = App::default();
         let mut ui = simulator(app.view());
-        for zone in ["Transport", "Browser", "Audio 1", "Inspector", "Mixer"] {
+        for zone in ["1.1.1", "Browser", "Audio 1", "Inspector", "Mixer"] {
             assert!(ui.find(zone).is_ok(), "{zone}");
         }
     }

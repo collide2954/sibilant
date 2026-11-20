@@ -30,8 +30,7 @@ impl Timing {
     }
 
     pub fn clock_of_frame(&self, frame: i64) -> Position<Clock> {
-        let scaled = i128::from(frame) * i128::from(SUPERCLOCKS_PER_SECOND);
-        Position::from_superclocks(narrow(scaled.div_euclid(i128::from(self.sample_rate))))
+        clock_of_frame(self.sample_rate, frame)
     }
 
     pub fn first_frame_at_or_after(&self, clock: Position<Clock>) -> i64 {
@@ -120,6 +119,11 @@ impl Iterator for Clicks<'_> {
             }
         }
     }
+}
+
+pub fn clock_of_frame(sample_rate: u32, frame: i64) -> Position<Clock> {
+    let scaled = i128::from(frame) * i128::from(SUPERCLOCKS_PER_SECOND);
+    Position::from_superclocks(narrow(scaled.div_euclid(i128::from(sample_rate))))
 }
 
 #[expect(
