@@ -1,6 +1,6 @@
 # 0005. Use a layered Cargo workspace
 
-- Status: Accepted
+- Status: Accepted, with the `sibilant-media` crate added by [0034](0034-wav-files-in-a-media-crate.md)
 - Date: 2026-11-19
 
 ## Context

@@ -47,3 +47,7 @@ To change a decision, write a new record. Then change the status of the old reco
 | [0030](0030-engine-frames-and-queues.md) | Count engine time in frames and control the engine through lock-free queues |
 | [0031](0031-transport-and-metronome.md) | Return to the play start on stop, and use a synthesized metronome |
 | [0032](0032-bsd-1-clause-license.md) | Accept the BSD-1-Clause license |
+| [0033](0033-import-through-the-browser.md) | Bring audio files into a project through the Browser zone |
+| [0034](0034-wav-files-in-a-media-crate.md) | Read WAV files in a media crate |
+| [0035](0035-clip-audio-in-memory.md) | Keep the audio of clips in memory at the output sample rate |
+| [0036](0036-fades-at-clip-edges.md) | Fade each clip edge for 4 ms |
