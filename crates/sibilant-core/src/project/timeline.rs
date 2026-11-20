@@ -30,6 +30,16 @@ impl Project {
             place(&mut track.timeline, &self.tempo_map, start, clip);
         })
     }
+
+    pub fn remove_clip(&self, track: TrackId, start: Position<Musical>) -> Result<Self, EditError> {
+        let found = self.track(track).ok_or(EditError::UnknownTrack(track))?;
+        if !found.timeline.contains_key(&start) {
+            return Err(EditError::NoClipAt(track, start));
+        }
+        self.edit_track(track, |track| {
+            track.timeline.remove(&start);
+        })
+    }
 }
 
 fn place(lane: &mut Lane, tempo: &TempoMap, start: Position<Musical>, clip: Clip) {
@@ -199,6 +209,28 @@ mod tests {
                 (quarter_notes(2), clip(20, 2)),
                 (quarter_notes(4), clip(2, 2))
             ]
+        );
+    }
+
+    #[test]
+    fn removing_a_clip_leaves_the_other_clips() {
+        let project = placed(&[(0, clip(0, 2)), (4, clip(10, 2))])
+            .remove_clip(TRACK, quarter_notes(0))
+            .unwrap();
+        assert_eq!(timeline(&project), [(quarter_notes(4), clip(10, 2))]);
+    }
+
+    #[test]
+    fn removing_a_clip_needs_a_clip_that_starts_there() {
+        let project = placed(&[(0, clip(0, 2))]);
+        let unknown = TrackId::new(9);
+        assert_eq!(
+            project.remove_clip(TRACK, quarter_notes(1)),
+            Err(EditError::NoClipAt(TRACK, quarter_notes(1)))
+        );
+        assert_eq!(
+            project.remove_clip(unknown, quarter_notes(0)),
+            Err(EditError::UnknownTrack(unknown))
         );
     }
 

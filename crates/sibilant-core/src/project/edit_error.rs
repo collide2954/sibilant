@@ -2,6 +2,7 @@ use std::error::Error;
 use std::fmt;
 
 use super::{SceneId, SourceId, TrackId};
+use crate::time::{Musical, Position};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditError {
@@ -9,6 +10,7 @@ pub enum EditError {
     DuplicateSource(SourceId),
     DuplicateTrack(TrackId),
     EmptyClip,
+    NoClipAt(TrackId, Position<Musical>),
     RegionOutsideSource(SourceId),
     UnknownScene(SceneId),
     UnknownSource(SourceId),
@@ -22,6 +24,13 @@ impl fmt::Display for EditError {
             Self::DuplicateSource(source) => write!(f, "{source} already exists"),
             Self::DuplicateTrack(track) => write!(f, "{track} already exists"),
             Self::EmptyClip => write!(f, "the clip has no length"),
+            Self::NoClipAt(track, start) => {
+                write!(
+                    f,
+                    "{track} has no clip that starts at tick {}",
+                    start.ticks()
+                )
+            }
             Self::RegionOutsideSource(source) => {
                 write!(f, "the clip region is not inside {source}")
             }
@@ -37,6 +46,7 @@ impl Error for EditError {}
 #[cfg(test)]
 mod tests {
     use crate::project::{EditError, SceneId, SourceId, TrackId};
+    use crate::time::Position;
 
     #[test]
     fn the_errors_name_the_track() {
@@ -70,5 +80,14 @@ mod tests {
     #[test]
     fn the_error_tells_that_a_clip_is_empty() {
         assert_eq!(EditError::EmptyClip.to_string(), "the clip has no length");
+    }
+
+    #[test]
+    fn the_error_tells_where_no_clip_starts() {
+        let error = EditError::NoClipAt(TrackId::new(1), Position::from_ticks(705_600));
+        assert_eq!(
+            error.to_string(),
+            "track 1 has no clip that starts at tick 705600"
+        );
     }
 }
