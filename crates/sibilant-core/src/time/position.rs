@@ -7,6 +7,8 @@ use super::Duration;
 pub struct Position<D>(i64, PhantomData<D>);
 
 impl<D> Position<D> {
+    pub const START: Self = Self::new(0);
+
     pub(super) const fn new(value: i64) -> Self {
         Self(value, PhantomData)
     }
@@ -42,7 +44,13 @@ impl<D> Sub for Position<D> {
 
 #[cfg(test)]
 mod tests {
-    use crate::time::{Duration, Musical, Position};
+    use crate::time::{Clock, Duration, Musical, Position};
+
+    #[test]
+    fn the_start_is_the_zero_position_of_each_domain() {
+        assert_eq!(Position::<Musical>::START, Position::from_ticks(0));
+        assert_eq!(Position::<Clock>::START, Position::from_superclocks(0));
+    }
 
     #[test]
     fn adding_a_duration_moves_a_position_forward() {

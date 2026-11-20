@@ -1,24 +1,90 @@
-use super::{Clock, Musical, Position, SUPERCLOCKS_PER_SECOND, TICKS_PER_BEAT, Tempo};
+use super::{Clock, Duration, Musical, Position, SUPERCLOCKS_PER_SECOND, TICKS_PER_BEAT, Tempo};
 
 #[derive(Debug, Clone)]
 pub struct TempoMap {
+    segments: Vec<Segment>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Segment {
+    start: Position<Musical>,
+    clock_start: Position<Clock>,
     tempo: Tempo,
 }
 
 impl TempoMap {
-    pub const fn new(tempo: Tempo) -> Self {
-        Self { tempo }
+    pub fn new(tempo: Tempo) -> Self {
+        Self {
+            segments: vec![Segment {
+                start: Position::START,
+                clock_start: Position::START,
+                tempo,
+            }],
+        }
+    }
+
+    #[must_use]
+    pub fn with_tempo(mut self, at: Position<Musical>, tempo: Tempo) -> Self {
+        let start = at.max(Position::START);
+        match self
+            .segments
+            .binary_search_by_key(&start, |segment| segment.start)
+        {
+            Ok(index) => self.segments[index].tempo = tempo,
+            Err(index) => self.segments.insert(
+                index,
+                Segment {
+                    start,
+                    clock_start: Position::START,
+                    tempo,
+                },
+            ),
+        }
+        self.recompute_clock_starts();
+        self
+    }
+
+    pub fn tempo_at(&self, position: Position<Musical>) -> Tempo {
+        self.segment_at(position).tempo
     }
 
     pub fn to_clock(&self, position: Position<Musical>) -> Position<Clock> {
-        let superclocks = to_f64(position.ticks()) * superclocks_per_tick(self.tempo);
-        Position::from_superclocks(round(superclocks))
+        let segment = self.segment_at(position);
+        segment.clock_start + to_clock_duration(position - segment.start, segment.tempo)
     }
 
     pub fn to_musical(&self, position: Position<Clock>) -> Position<Musical> {
-        let ticks = to_f64(position.superclocks()) / superclocks_per_tick(self.tempo);
-        Position::from_ticks(round(ticks))
+        let segment = self.last_segment_where(|segment| segment.clock_start <= position);
+        segment.start + to_musical_duration(position - segment.clock_start, segment.tempo)
     }
+
+    fn segment_at(&self, position: Position<Musical>) -> Segment {
+        self.last_segment_where(|segment| segment.start <= position)
+    }
+
+    fn last_segment_where(&self, predicate: impl FnMut(&Segment) -> bool) -> Segment {
+        let index = self.segments.partition_point(predicate).saturating_sub(1);
+        self.segments[index]
+    }
+
+    fn recompute_clock_starts(&mut self) {
+        let mut previous = self.segments[0];
+        for segment in &mut self.segments[1..] {
+            let length = segment.start - previous.start;
+            segment.clock_start = previous.clock_start + to_clock_duration(length, previous.tempo);
+            previous = *segment;
+        }
+    }
+}
+
+fn to_clock_duration(duration: Duration<Musical>, tempo: Tempo) -> Duration<Clock> {
+    let superclocks = to_f64(duration.ticks()) * superclocks_per_tick(tempo);
+    Duration::from_superclocks(round(superclocks))
+}
+
+fn to_musical_duration(duration: Duration<Clock>, tempo: Tempo) -> Duration<Musical> {
+    let ticks = to_f64(duration.superclocks()) / superclocks_per_tick(tempo);
+    Duration::from_ticks(round(ticks))
 }
 
 fn superclocks_per_tick(tempo: Tempo) -> f64 {
@@ -47,7 +113,9 @@ mod tests {
 
     use crate::time::{Clock, Musical, Position, SUPERCLOCKS_PER_SECOND, Tempo, TempoMap};
 
-    const RANGE: i64 = 1 << 40;
+    const CHANGE_RANGE: i64 = 1 << 32;
+    const MUSICAL_RANGE: i64 = 1 << 34;
+    const CLOCK_RANGE: i64 = 1 << 44;
 
     fn tempo(bpm: f64) -> Tempo {
         Tempo::from_bpm(bpm).unwrap()
@@ -93,33 +161,99 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_change_sets_the_tempo_from_its_position() {
+        let map = TempoMap::new(tempo(120.0)).with_tempo(beats(4), tempo(60.0));
+        assert_eq!(map.tempo_at(beats(3)), tempo(120.0));
+        assert_eq!(map.tempo_at(beats(4)), tempo(60.0));
+    }
+
+    #[test]
+    fn musical_time_after_a_change_advances_at_the_new_tempo() {
+        let map = TempoMap::new(tempo(120.0)).with_tempo(beats(4), tempo(60.0));
+        assert_eq!(map.to_clock(beats(4)), Position::from_seconds(2));
+        assert_eq!(map.to_clock(beats(6)), Position::from_seconds(4));
+    }
+
+    #[test]
+    fn clock_time_after_a_change_converts_back_at_the_new_tempo() {
+        let map = TempoMap::new(tempo(120.0)).with_tempo(beats(4), tempo(60.0));
+        assert_eq!(map.to_musical(Position::from_seconds(4)), beats(6));
+    }
+
+    #[test]
+    fn changes_apply_in_position_order() {
+        let map = TempoMap::new(tempo(120.0))
+            .with_tempo(beats(8), tempo(240.0))
+            .with_tempo(beats(4), tempo(60.0));
+        assert_eq!(map.to_clock(beats(12)), Position::from_seconds(7));
+    }
+
+    #[test]
+    fn a_change_at_the_same_position_replaces_the_old_tempo() {
+        let map = TempoMap::new(tempo(120.0))
+            .with_tempo(beats(4), tempo(60.0))
+            .with_tempo(beats(4), tempo(240.0));
+        assert_eq!(map.tempo_at(beats(4)), tempo(240.0));
+    }
+
+    #[test]
+    fn a_change_at_or_before_the_start_replaces_the_first_tempo() {
+        let map = TempoMap::new(tempo(120.0)).with_tempo(beats(-2), tempo(60.0));
+        assert_eq!(map.tempo_at(beats(-4)), tempo(60.0));
+        assert_eq!(map.to_clock(beats(1)), Position::from_seconds(1));
+    }
+
+    fn beats(beats: i64) -> Position<Musical> {
+        Position::from_beats(beats)
+    }
+
+    fn tempo_changes() -> impl Strategy<Value = (f64, Vec<(i64, f64)>)> {
+        (
+            1.0..=1000.0,
+            prop::collection::vec((1..CHANGE_RANGE, 1.0..=1000.0), 0..8),
+        )
+    }
+
+    fn tempo_map(first: f64, changes: &[(i64, f64)]) -> TempoMap {
+        changes
+            .iter()
+            .fold(TempoMap::new(tempo(first)), |map, &(ticks, bpm)| {
+                map.with_tempo(Position::from_ticks(ticks), tempo(bpm))
+            })
+    }
+
     proptest! {
         #[test]
-        fn musical_time_survives_a_round_trip(bpm in 1.0..=1000.0, ticks in -RANGE..RANGE) {
-            let map = TempoMap::new(tempo(bpm));
+        fn musical_time_survives_a_round_trip(
+            (first, changes) in tempo_changes(),
+            ticks in -MUSICAL_RANGE..MUSICAL_RANGE,
+        ) {
+            let map = tempo_map(first, &changes);
             let position = Position::<Musical>::from_ticks(ticks);
             prop_assert_eq!(map.to_musical(map.to_clock(position)), position);
         }
 
         #[test]
-        fn a_clock_round_trip_moves_at_most_half_a_tick(
-            bpm in 1.0..=1000.0,
-            superclocks in -RANGE..RANGE,
+        fn a_clock_round_trip_moves_at_most_half_a_tick_of_the_slowest_tempo(
+            (first, changes) in tempo_changes(),
+            superclocks in -CLOCK_RANGE..CLOCK_RANGE,
         ) {
-            let map = TempoMap::new(tempo(bpm));
+            let map = tempo_map(first, &changes);
+            let slowest = changes.iter().map(|&(_, bpm)| bpm).fold(first, f64::min);
+            let slowest_tick = TempoMap::new(tempo(slowest)).to_clock(Position::from_ticks(1));
             let position = Position::<Clock>::from_superclocks(superclocks);
             let moved = (map.to_clock(map.to_musical(position)) - position).superclocks();
-            let half_tick = map.to_clock(Position::from_ticks(1)).superclocks() / 2 + 1;
-            prop_assert!(moved.abs() <= half_tick, "moved {} superclocks", moved);
+            prop_assert!(moved.abs() <= slowest_tick.superclocks() / 2 + 1, "moved {} superclocks", moved);
         }
 
         #[test]
         fn later_musical_time_never_maps_to_earlier_clock_time(
-            bpm in 1.0..=1000.0,
-            a in -RANGE..RANGE,
-            b in -RANGE..RANGE,
+            (first, changes) in tempo_changes(),
+            a in -MUSICAL_RANGE..MUSICAL_RANGE,
+            b in -MUSICAL_RANGE..MUSICAL_RANGE,
         ) {
-            let map = TempoMap::new(tempo(bpm));
+            let map = tempo_map(first, &changes);
             let (early, late) = (a.min(b), a.max(b));
             prop_assert!(
                 map.to_clock(Position::from_ticks(early)) <= map.to_clock(Position::from_ticks(late))
