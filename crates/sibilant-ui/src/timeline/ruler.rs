@@ -1,8 +1,10 @@
-use iced::widget::canvas::{self, Canvas, Frame, Geometry};
+use iced::keyboard::Modifiers;
+use iced::widget::canvas::{self, Action, Canvas, Event, Frame, Geometry};
 use iced::{Element, Length, Point, Rectangle, Renderer, Size, Theme, mouse};
 use sibilant_core::time::TimeSignatureMap;
 
-use super::Viewport;
+use super::{Viewport, wheel};
+use crate::command::Command;
 use crate::fonts;
 use crate::theme::Palette;
 
@@ -17,12 +19,22 @@ struct Ruler<'a> {
     palette: Palette,
 }
 
-impl<Message> canvas::Program<Message> for Ruler<'_> {
-    type State = ();
+impl canvas::Program<Command> for Ruler<'_> {
+    type State = Modifiers;
+
+    fn update(
+        &self,
+        modifiers: &mut Modifiers,
+        event: &Event,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> Option<Action<Command>> {
+        wheel(modifiers, event, bounds, cursor)
+    }
 
     fn draw(
         &self,
-        _state: &(),
+        _modifiers: &Modifiers,
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
@@ -62,11 +74,11 @@ impl<Message> canvas::Program<Message> for Ruler<'_> {
     }
 }
 
-pub fn ruler<'a, Message: 'a>(
+pub fn ruler(
     viewport: Viewport,
-    time_signatures: &'a TimeSignatureMap,
+    time_signatures: &TimeSignatureMap,
     palette: Palette,
-) -> Element<'a, Message> {
+) -> Element<'_, Command> {
     let ruler = Ruler {
         viewport,
         time_signatures,

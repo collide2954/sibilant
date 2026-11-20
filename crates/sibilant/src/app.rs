@@ -47,6 +47,12 @@ impl App {
             Command::Redo => {
                 self.history.redo();
             }
+            Command::ScrollTimeline { pixels } => {
+                self.viewport = self.viewport.scrolled(pixels);
+            }
+            Command::ZoomTimeline { steps, anchor } => {
+                self.viewport = self.viewport.zoomed(steps, anchor);
+            }
         }
     }
 
@@ -83,6 +89,7 @@ fn change_mix(
 mod tests {
     use iced_test::simulator;
     use sibilant_core::project::{Project, Track, TrackId};
+    use sibilant_core::time::Position;
     use sibilant_ui::command::Command;
     use sibilant_ui::theme::Palette;
 
@@ -130,6 +137,19 @@ mod tests {
         app.update(Command::Undo);
         app.update(Command::AddTrack);
         assert_ne!(project(&app).tracks().last().unwrap().id(), undone);
+    }
+
+    #[test]
+    fn zoom_and_scroll_change_the_view_but_not_the_undo_history() {
+        let mut app = App::default();
+        app.update(Command::ZoomTimeline {
+            steps: 1.0,
+            anchor: 0.0,
+        });
+        app.update(Command::ScrollTimeline { pixels: 80.0 });
+        assert!((app.viewport.pixels_per_quarter_note() - 40.0).abs() < 1e-9);
+        assert_eq!(app.viewport.start(), Position::from_quarter_notes(2));
+        assert!(!app.history.can_undo());
     }
 
     #[test]

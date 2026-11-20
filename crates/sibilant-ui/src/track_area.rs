@@ -182,6 +182,9 @@ fn quiet(palette: Palette, status: button::Status) -> button::Style {
 
 #[cfg(test)]
 mod tests {
+    use iced::keyboard::{self, Modifiers};
+    use iced::mouse::{self, ScrollDelta};
+    use iced::{Event, Point};
     use iced_test::simulator;
     use sibilant_core::project::{AudioSource, Clip, Ids, Project, Region};
     use sibilant_core::time::Duration;
@@ -193,6 +196,31 @@ mod tests {
 
     fn new_project() -> Project {
         Project::new(&mut Ids::default())
+    }
+
+    #[test]
+    fn command_and_the_wheel_over_a_lane_zoom_around_the_mouse() {
+        let project = new_project();
+        let mut ui = simulator(track_area::view(
+            &project,
+            Viewport::default(),
+            Palette::GRAPHITE,
+        ));
+        ui.point_at(Point::new(700.0, 60.0));
+        ui.simulate([
+            Event::Keyboard(keyboard::Event::ModifiersChanged(Modifiers::COMMAND)),
+            Event::Mouse(mouse::Event::WheelScrolled {
+                delta: ScrollDelta::Lines { x: 0.0, y: 1.0 },
+            }),
+        ]);
+        let messages: Vec<_> = ui.into_messages().collect();
+        assert_eq!(
+            messages,
+            [Command::ZoomTimeline {
+                steps: 1.0,
+                anchor: 175.0
+            }]
+        );
     }
 
     #[test]

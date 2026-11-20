@@ -1,16 +1,40 @@
 use iced::keyboard::{self, Key, Modifiers};
+use iced::mouse::ScrollDelta;
 use sibilant_core::project::TrackId;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+const WHEEL_LINE: f32 = 48.0;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Command {
     AddTrack,
     Redo,
+    ScrollTimeline { pixels: f32 },
     ToggleMute(TrackId),
     ToggleSolo(TrackId),
     Undo,
+    ZoomTimeline { steps: f32, anchor: f32 },
 }
 
 impl Command {
+    pub fn from_wheel(delta: ScrollDelta, modifiers: Modifiers, anchor: f32) -> Option<Self> {
+        let (x, y) = match delta {
+            ScrollDelta::Lines { x, y } => (x * WHEEL_LINE, y * WHEEL_LINE),
+            ScrollDelta::Pixels { x, y } => (x, y),
+        };
+        if modifiers.command() {
+            let steps = y / WHEEL_LINE;
+            return (steps != 0.0).then_some(Self::ZoomTimeline { steps, anchor });
+        }
+        let sideways = if modifiers.shift() && y != 0.0 {
+            y
+        } else if x.abs() > y.abs() {
+            x
+        } else {
+            0.0
+        };
+        (sideways != 0.0).then_some(Self::ScrollTimeline { pixels: -sideways })
+    }
+
     pub fn from_key_event(event: keyboard::Event) -> Option<Self> {
         match event {
             keyboard::Event::KeyPressed {
@@ -44,6 +68,7 @@ impl Command {
 #[cfg(test)]
 mod tests {
     use iced::keyboard::{self, Key, Modifiers, key};
+    use iced::mouse::ScrollDelta;
 
     use crate::command::Command;
 
@@ -109,5 +134,47 @@ mod tests {
     #[test]
     fn a_key_that_repeats_while_held_sends_no_more_commands() {
         assert_eq!(Command::from_key_event(key_event("t", true)), None);
+    }
+
+    fn lines(x: f32, y: f32) -> ScrollDelta {
+        ScrollDelta::Lines { x, y }
+    }
+
+    #[test]
+    fn command_and_the_wheel_zoom_around_the_mouse() {
+        let zoom_in = Command::from_wheel(lines(0.0, 1.0), Modifiers::COMMAND, 100.0);
+        let zoom_out = Command::from_wheel(lines(0.0, -2.0), Modifiers::COMMAND, 100.0);
+        let steps = |steps| Command::ZoomTimeline {
+            steps,
+            anchor: 100.0,
+        };
+        assert_eq!(zoom_in, Some(steps(1.0)));
+        assert_eq!(zoom_out, Some(steps(-2.0)));
+    }
+
+    #[test]
+    fn shift_and_the_wheel_scroll_the_timeline() {
+        let down = Command::from_wheel(lines(0.0, -1.0), Modifiers::SHIFT, 0.0);
+        let sideways = Command::from_wheel(lines(-1.0, 0.0), Modifiers::SHIFT, 0.0);
+        let later = Some(Command::ScrollTimeline { pixels: 48.0 });
+        assert_eq!(down, later);
+        assert_eq!(sideways, later);
+    }
+
+    #[test]
+    fn a_horizontal_swipe_scrolls_the_timeline() {
+        let swipe = ScrollDelta::Pixels { x: -30.0, y: 0.0 };
+        assert_eq!(
+            Command::from_wheel(swipe, Modifiers::empty(), 0.0),
+            Some(Command::ScrollTimeline { pixels: 30.0 })
+        );
+    }
+
+    #[test]
+    fn the_plain_wheel_leaves_the_scrolling_to_the_track_list() {
+        assert_eq!(
+            Command::from_wheel(lines(0.0, 1.0), Modifiers::empty(), 0.0),
+            None
+        );
     }
 }

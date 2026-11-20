@@ -2,11 +2,36 @@ mod grid;
 mod lane;
 mod ruler;
 
+use iced::keyboard::{self, Modifiers};
+use iced::widget::canvas::{Action, Event};
+use iced::{Rectangle, mouse};
 use sibilant_core::time::{Duration, Musical, Position, TICKS_PER_QUARTER_NOTE};
+
+use crate::command::Command;
 
 pub use grid::{BarLine, Grid};
 pub use lane::{ClipBox, lane};
 pub use ruler::{HEIGHT as RULER_HEIGHT, ruler};
+
+fn wheel(
+    modifiers: &mut Modifiers,
+    event: &Event,
+    bounds: Rectangle,
+    cursor: mouse::Cursor,
+) -> Option<Action<Command>> {
+    match event {
+        Event::Keyboard(keyboard::Event::ModifiersChanged(changed)) => {
+            *modifiers = *changed;
+            None
+        }
+        Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
+            let position = cursor.position_in(bounds)?;
+            Command::from_wheel(*delta, *modifiers, position.x)
+                .map(|command| Action::publish(command).and_capture())
+        }
+        _ => None,
+    }
+}
 
 const DEFAULT_ZOOM: f64 = 32.0;
 const MIN_ZOOM: f64 = 2.0;

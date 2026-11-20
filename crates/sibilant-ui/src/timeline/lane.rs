@@ -1,8 +1,10 @@
-use iced::widget::canvas::{self, Canvas, Frame, Geometry};
+use iced::keyboard::Modifiers;
+use iced::widget::canvas::{self, Action, Canvas, Event, Frame, Geometry};
 use iced::{Element, Length, Point, Rectangle, Renderer, Size, Theme, mouse};
 use sibilant_core::project::{Project, Track};
 
-use super::Viewport;
+use super::{Viewport, wheel};
+use crate::command::Command;
 use crate::theme::Palette;
 
 const CLIP_INSET: f32 = 2.0;
@@ -17,12 +19,22 @@ struct Lane<'a> {
     palette: Palette,
 }
 
-impl<Message> canvas::Program<Message> for Lane<'_> {
-    type State = ();
+impl canvas::Program<Command> for Lane<'_> {
+    type State = Modifiers;
+
+    fn update(
+        &self,
+        modifiers: &mut Modifiers,
+        event: &Event,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> Option<Action<Command>> {
+        wheel(modifiers, event, bounds, cursor)
+    }
 
     fn draw(
         &self,
-        _state: &(),
+        _modifiers: &Modifiers,
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
@@ -75,12 +87,12 @@ impl<Message> canvas::Program<Message> for Lane<'_> {
     }
 }
 
-pub fn lane<'a, Message: 'a>(
+pub fn lane<'a>(
     viewport: Viewport,
     project: &'a Project,
     track: &'a Track,
     palette: Palette,
-) -> Element<'a, Message> {
+) -> Element<'a, Command> {
     let lane = Lane {
         viewport,
         project,
