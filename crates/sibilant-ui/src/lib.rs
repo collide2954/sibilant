@@ -1,3 +1,4 @@
+pub mod command;
 pub mod fonts;
 pub mod icons;
 pub mod shell;
