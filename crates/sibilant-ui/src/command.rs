@@ -1,6 +1,7 @@
 use iced::keyboard::{self, Key, Modifiers, key};
 use iced::mouse::ScrollDelta;
 use sibilant_core::project::TrackId;
+use sibilant_core::time::{Musical, Position};
 
 const WHEEL_LINE: f32 = 48.0;
 
@@ -8,14 +9,23 @@ const WHEEL_LINE: f32 = 48.0;
 pub enum Command {
     AddTrack,
     Continue,
+    Drop {
+        track: Option<TrackId>,
+        start: Position<Musical>,
+    },
     PlayOrStop,
     Redo,
-    ScrollTimeline { pixels: f32 },
+    ScrollTimeline {
+        pixels: f32,
+    },
     ToggleMetronome,
     ToggleMute(TrackId),
     ToggleSolo(TrackId),
     Undo,
-    ZoomTimeline { steps: f32, anchor: f32 },
+    ZoomTimeline {
+        steps: f32,
+        anchor: f32,
+    },
 }
 
 impl Command {

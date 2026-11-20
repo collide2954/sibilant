@@ -142,6 +142,7 @@ impl App {
                 self.metronome = !self.metronome;
                 self.send(engine::Command::SetMetronome(self.metronome));
             }
+            Command::Drop { .. } => {}
         }
     }
 
@@ -175,6 +176,7 @@ impl App {
             viewport: self.viewport,
             playhead: position,
             waveforms: &self.waveforms,
+            dragging: false,
         };
         let tracks = track_area::view(project, timeline, self.palette).map(Message::Command);
         shell::view(self.palette, transport, browser, tracks)

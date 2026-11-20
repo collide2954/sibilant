@@ -1,13 +1,14 @@
 use iced::widget::{button, column, container, row, scrollable, space, text};
-use iced::{Border, Element, Length};
+use iced::{Alignment, Border, Element, Length};
 use sibilant_core::project::{Clip, Project, Track};
 
 use crate::command::Command;
 use crate::style::{filled, quiet};
 use crate::theme::{Color, Palette};
-use crate::timeline::{RULER_HEIGHT, View, lane, ruler};
+use crate::timeline::{RULER_HEIGHT, View, lane, new_track_lane, ruler};
 
 const ROW_HEIGHT: f32 = 64.0;
+const NEW_TRACK_HEIGHT: f32 = 40.0;
 const HEADER_WIDTH: f32 = 200.0;
 const SLOT_WIDTH: f32 = 80.0;
 const COLOR_STRIP_WIDTH: f32 = 4.0;
@@ -35,7 +36,15 @@ pub fn view<'a>(
         .width(HEADER_WIDTH)
         .padding(PADDING)
         .style(move |_, status| quiet(palette, status));
-    let content = column![rows, scene_row(project, palette), add_track].spacing(DIVIDER);
+    let new_track = row![
+        add_track,
+        slot_spacers(project),
+        new_track_lane(timeline, project.time_signature_map(), palette)
+    ]
+    .spacing(DIVIDER)
+    .height(NEW_TRACK_HEIGHT)
+    .align_y(Alignment::Center);
+    let content = column![rows, scene_row(project, palette), new_track].spacing(DIVIDER);
     let ruler = ruler(timeline, project.time_signature_map(), palette);
     let ruler_row = row![space().width(HEADER_WIDTH), slot_spacers(project), ruler]
         .spacing(DIVIDER)
@@ -177,7 +186,7 @@ mod tests {
     use iced::{Event, Point};
     use iced_test::simulator;
     use sibilant_core::project::{AudioSource, Clip, Ids, Project, Region};
-    use sibilant_core::time::Duration;
+    use sibilant_core::time::{Duration, Position};
 
     use crate::command::Command;
     use crate::theme::Palette;
@@ -211,6 +220,75 @@ mod tests {
                 anchor: 175.0
             }]
         );
+    }
+
+    const LANE_LEFT: f32 = 525.0;
+
+    fn dragging() -> View<'static> {
+        View {
+            dragging: true,
+            ..View::default()
+        }
+    }
+
+    fn release() -> Event {
+        Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+    }
+
+    fn release_over_first_lane(project: &Project, timeline: View<'_>) -> Vec<Command> {
+        let mut ui = simulator(track_area::view(project, timeline, Palette::GRAPHITE));
+        ui.point_at(Point::new(LANE_LEFT + 40.0, 60.0));
+        ui.simulate([release()]);
+        ui.into_messages().collect()
+    }
+
+    #[test]
+    fn a_dragged_file_drops_on_the_track_under_the_mouse_at_the_snapped_position() {
+        let project = new_project();
+        let first = project.tracks().next().unwrap().id();
+        assert_eq!(
+            release_over_first_lane(&project, dragging()),
+            [Command::Drop {
+                track: Some(first),
+                start: Position::from_quarter_notes(1)
+            }]
+        );
+    }
+
+    #[test]
+    fn without_a_drag_a_release_over_a_lane_drops_nothing() {
+        assert_eq!(release_over_first_lane(&new_project(), View::default()), []);
+    }
+
+    #[test]
+    fn a_file_dropped_beside_the_add_track_button_goes_on_a_new_track() {
+        let project = new_project();
+        let mut ui = simulator(track_area::view(&project, dragging(), Palette::GRAPHITE));
+        let button = ui.find("Add track").unwrap().bounds();
+        ui.point_at(Point::new(LANE_LEFT + 40.0, button.center_y()));
+        ui.simulate([release()]);
+        let messages: Vec<_> = ui.into_messages().collect();
+        assert_eq!(
+            messages,
+            [Command::Drop {
+                track: None,
+                start: Position::from_quarter_notes(1)
+            }]
+        );
+    }
+
+    #[test]
+    fn only_a_drag_shows_where_a_new_track_starts() {
+        let project = new_project();
+        let hint = "Drop here for a new track";
+        let mut ui = simulator(track_area::view(&project, dragging(), Palette::GRAPHITE));
+        assert!(ui.find(hint).is_ok());
+        let mut ui = simulator(track_area::view(
+            &project,
+            View::default(),
+            Palette::GRAPHITE,
+        ));
+        assert!(ui.find(hint).is_err());
     }
 
     #[test]

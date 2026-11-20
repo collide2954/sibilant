@@ -1,3 +1,4 @@
+mod drag;
 mod grid;
 mod lane;
 mod ruler;
@@ -16,6 +17,7 @@ use sibilant_media::Peaks;
 use crate::command::Command;
 use crate::theme::Palette;
 
+pub use drag::new_track_lane;
 pub use grid::{BarLine, Grid};
 pub use lane::{ClipBox, lane};
 pub use ruler::{HEIGHT as RULER_HEIGHT, ruler};
@@ -50,6 +52,7 @@ pub struct View<'a> {
     pub viewport: Viewport,
     pub playhead: Position<Musical>,
     pub waveforms: &'a Waveforms,
+    pub dragging: bool,
 }
 
 impl Default for View<'_> {
@@ -58,6 +61,7 @@ impl Default for View<'_> {
             viewport: Viewport::default(),
             playhead: Position::START,
             waveforms: &NO_WAVEFORMS,
+            dragging: false,
         }
     }
 }

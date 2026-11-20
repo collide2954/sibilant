@@ -3,7 +3,7 @@ use std::io::Cursor;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{env, process};
 
-use iced::{Element, Settings, Size, Theme};
+use iced::{Element, Point, Settings, Size, Theme};
 use iced_test::Simulator;
 
 use crate::theme::{Color, Palette};
@@ -20,15 +20,33 @@ impl Pixels {
         element: impl Into<Element<'a, Message>>,
         size: Size,
     ) -> Self {
+        Self::render_with_mouse(element, size, None)
+    }
+
+    pub(crate) fn render_pointing<'a, Message>(
+        element: impl Into<Element<'a, Message>>,
+        size: Size,
+        mouse: Point,
+    ) -> Self {
+        Self::render_with_mouse(element, size, Some(mouse))
+    }
+
+    fn render_with_mouse<'a, Message>(
+        element: impl Into<Element<'a, Message>>,
+        size: Size,
+        mouse: Option<Point>,
+    ) -> Self {
         static RENDERS: AtomicUsize = AtomicUsize::new(0);
         let folder = env::temp_dir().join(format!(
             "sibilant-pixels-{}-{}",
             process::id(),
             RENDERS.fetch_add(1, Ordering::Relaxed)
         ));
-        let snapshot = Simulator::with_size(Settings::default(), size, element)
-            .snapshot(&Theme::from(Palette::GRAPHITE))
-            .unwrap();
+        let mut ui = Simulator::with_size(Settings::default(), size, element);
+        if let Some(mouse) = mouse {
+            ui.point_at(mouse);
+        }
+        let snapshot = ui.snapshot(&Theme::from(Palette::GRAPHITE)).unwrap();
         snapshot.matches_image(folder.join("render")).unwrap();
         let path = fs::read_dir(&folder)
             .unwrap()

@@ -4,6 +4,7 @@ use iced::{Element, Length, Point, Rectangle, Renderer, Size, Theme, mouse};
 use sibilant_core::project::{Clip, Project, Track};
 use sibilant_core::time::{Musical, Position};
 
+use super::drag::{drag_interaction, draw_drop_line, drop_action};
 use super::{View, Viewport, WaveColumn, draw_playhead, wheel};
 use crate::command::Command;
 use crate::theme::Palette;
@@ -32,7 +33,19 @@ impl canvas::Program<Command> for Lane<'_> {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> Option<Action<Command>> {
-        wheel(modifiers, event, bounds, cursor)
+        let time_signatures = self.project.time_signature_map();
+        let track = Some(self.track.id());
+        drop_action(self.view, time_signatures, track, event, bounds, cursor)
+            .or_else(|| wheel(modifiers, event, bounds, cursor))
+    }
+
+    fn mouse_interaction(
+        &self,
+        _modifiers: &Modifiers,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> mouse::Interaction {
+        drag_interaction(self.view, bounds, cursor)
     }
 
     fn draw(
@@ -41,7 +54,7 @@ impl canvas::Program<Command> for Lane<'_> {
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
-        _cursor: mouse::Cursor,
+        cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
         let palette = self.palette;
@@ -98,6 +111,15 @@ impl canvas::Program<Command> for Lane<'_> {
                 });
             });
         }
+        let time_signatures = self.project.time_signature_map();
+        draw_drop_line(
+            &mut frame,
+            self.view,
+            time_signatures,
+            bounds,
+            cursor,
+            palette,
+        );
         draw_playhead(&mut frame, self.view, palette);
         vec![frame.into_geometry()]
     }
@@ -183,7 +205,7 @@ impl Viewport {
 
 #[cfg(test)]
 mod tests {
-    use iced::Size;
+    use iced::{Point, Size};
     use sibilant_core::project::{AudioSource, Clip, Ids, Project, Region, Track};
     use sibilant_core::time::{Duration, Musical, Position, Tempo, TempoMap};
 
@@ -272,6 +294,33 @@ mod tests {
         let pixels = Pixels::render(lane, Size::new(400.0, 64.0));
         assert_eq!(pixels.color_at(144, 32), palette.accent);
         assert_eq!(pixels.color_at(146, 32), palette.background);
+    }
+
+    fn dragging() -> View<'static> {
+        View {
+            dragging: true,
+            ..View::default()
+        }
+    }
+
+    #[test]
+    fn a_dragged_file_shows_its_drop_position_as_a_wide_line() {
+        let palette = Palette::GRAPHITE;
+        let project = Project::new(&mut Ids::default());
+        let lane = lane(dragging(), &project, first_track(&project), palette);
+        let pixels = Pixels::render_pointing(lane, Size::new(400.0, 64.0), Point::new(40.0, 32.0));
+        assert_eq!(pixels.color_at(32, 10), palette.accent);
+        assert_eq!(pixels.color_at(33, 10), palette.accent);
+        assert_eq!(pixels.color_at(36, 10), palette.background);
+    }
+
+    #[test]
+    fn without_a_drag_the_lane_shows_no_drop_line() {
+        let palette = Palette::GRAPHITE;
+        let project = Project::new(&mut Ids::default());
+        let lane = lane(View::default(), &project, first_track(&project), palette);
+        let pixels = Pixels::render_pointing(lane, Size::new(400.0, 64.0), Point::new(40.0, 32.0));
+        assert_eq!(pixels.color_at(33, 10), palette.background);
     }
 
     #[test]
