@@ -26,3 +26,7 @@ To change a decision, write a new record. Then change the status of the old reco
 | [0009](0009-f32-audio-and-f64-time.md) | Use f32 for audio and f64 for time calculations |
 | [0010](0010-integer-time-in-two-domains.md) | Keep time as integers in two domains |
 | [0011](0011-real-time-safe-engine.md) | Make the engine real-time safe and ready for parallel processing |
+| [0012](0012-dark-theme-with-tokens.md) | Use a dark graphite theme with one accent color |
+| [0013](0013-fixed-resizable-zones.md) | Use fixed window zones that the user can resize |
+| [0014](0014-inline-clip-launcher.md) | Show the clip launcher inline in each track row |
+| [0015](0015-mouse-first-with-full-keyboard.md) | Make the mouse the main input and give full keyboard control |
