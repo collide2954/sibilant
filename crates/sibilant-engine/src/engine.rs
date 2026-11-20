@@ -1,6 +1,6 @@
 use std::mem;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
 
 use rtrb::{Consumer, Producer, RingBuffer};
 use sibilant_core::time::{Musical, Position};
@@ -26,6 +26,7 @@ pub enum Command {
 struct Shared {
     playing: AtomicBool,
     previewing: AtomicBool,
+    previews_started: AtomicUsize,
     playhead: AtomicI64,
 }
 
@@ -112,6 +113,10 @@ impl Controller {
         self.shared.previewing.load(Ordering::Relaxed)
     }
 
+    pub fn previews_started(&self) -> usize {
+        self.shared.previews_started.load(Ordering::Relaxed)
+    }
+
     pub fn replace_arrangement(&mut self, arrangement: Arrangement) -> bool {
         self.arrangements.push(Box::new(arrangement)).is_ok()
     }
@@ -174,6 +179,7 @@ impl Engine {
             if let Some(old) = self.preview.start(audio) {
                 let _ = self.released_previews.push(old);
             }
+            self.shared.previews_started.fetch_add(1, Ordering::Relaxed);
         }
     }
 
@@ -597,6 +603,17 @@ mod tests {
         let left = left(&run(&mut engine, 1_000));
         assert!(left[0] > 0.0);
         assert_eq!(peak(&left[192..]), 0.0);
+        assert!(!controller.is_previewing());
+    }
+
+    #[test]
+    fn the_controller_counts_the_previews_that_the_engine_started() {
+        let (mut controller, mut engine) = engine();
+        controller.preview(constant(0.5, 10));
+        controller.preview(constant(0.5, 10));
+        assert_eq!(controller.previews_started(), 0);
+        let _ = run(&mut engine, 100);
+        assert_eq!(controller.previews_started(), 2);
         assert!(!controller.is_previewing());
     }
 
