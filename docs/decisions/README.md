@@ -35,3 +35,4 @@ To change a decision, write a new record. Then change the status of the old reco
 | [0018](0018-same-checks-everywhere.md) | Run the same checks on each computer and in CI |
 | [0019](0019-permissive-licenses-only.md) | Accept only dependencies with permissive licenses |
 | [0020](0020-ste-documentation-and-few-comments.md) | Write documentation in ASD-STE100 and keep comments to a minimum |
+| [0021](0021-tick-resolution-and-time-types.md) | Use 705,600 ticks for each quarter note and typed time values |
