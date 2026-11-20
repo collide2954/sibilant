@@ -1,6 +1,6 @@
 # 0019. Accept only dependencies with permissive licenses
 
-- Status: Accepted, with exceptions in [0026](0026-license-exceptions-for-iced.md)
+- Status: Accepted, with exceptions in [0026](0026-license-exceptions-for-iced.md) and BSD-1-Clause added by [0032](0032-bsd-1-clause-license.md)
 - Date: 2026-11-19
 
 ## Context

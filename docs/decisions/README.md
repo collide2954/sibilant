@@ -46,3 +46,4 @@ To change a decision, write a new record. Then change the status of the old reco
 | [0029](0029-timeline-zoom-and-ruler.md) | Zoom the timeline with Ctrl and the wheel, and show bars and beats |
 | [0030](0030-engine-frames-and-queues.md) | Count engine time in frames and control the engine through lock-free queues |
 | [0031](0031-transport-and-metronome.md) | Return to the play start on stop, and use a synthesized metronome |
+| [0032](0032-bsd-1-clause-license.md) | Accept the BSD-1-Clause license |
