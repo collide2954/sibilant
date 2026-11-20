@@ -85,6 +85,16 @@ mod tests {
     }
 
     #[test]
+    fn a_track_lists_its_full_slots_in_the_order_of_the_scene_ids() {
+        let project = project()
+            .put_clip_in_slot(TRACK, VERSE, clip(0, 2))
+            .and_then(|project| project.put_clip_in_slot(TRACK, INTRO, clip(1, 3)))
+            .unwrap();
+        let slots: Vec<_> = project.track(TRACK).unwrap().slots().collect();
+        assert_eq!(slots, [(INTRO, &clip(1, 3)), (VERSE, &clip(0, 2))]);
+    }
+
+    #[test]
     fn clearing_a_slot_removes_its_clip() {
         let project = project()
             .put_clip_in_slot(TRACK, INTRO, clip(0, 2))

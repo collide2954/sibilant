@@ -35,6 +35,12 @@ impl Track {
     pub fn slot(&self, scene: SceneId) -> Option<&Clip> {
         self.slots.get(&scene).map(Arc::as_ref)
     }
+
+    pub fn slots(&self) -> impl ExactSizeIterator<Item = (SceneId, &Clip)> {
+        self.slots
+            .iter()
+            .map(|(&scene, clip)| (scene, clip.as_ref()))
+    }
 }
 
 impl Project {
