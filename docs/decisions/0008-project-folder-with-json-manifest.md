@@ -1,6 +1,6 @@
 # 0008. Save projects as a folder with a JSON manifest
 
-- Status: Accepted
+- Status: Accepted, with the file layout changed by [0038](0038-project-file-in-a-project-folder.md)
 - Date: 2026-11-19
 
 ## Context
