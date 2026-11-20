@@ -60,6 +60,18 @@ impl Location {
             .collect::<Option<Vec<_>>>()?;
         Some(parts.join("/"))
     }
+
+    pub(crate) fn resolve(&self, stored: &str) -> Option<PathBuf> {
+        stored
+            .split('/')
+            .try_fold(self.folder().to_path_buf(), |path, part| {
+                let mut components = Path::new(part).components();
+                match (components.next(), components.next()) {
+                    (Some(Component::Normal(name)), None) => Some(path.join(name)),
+                    _ => None,
+                }
+            })
+    }
 }
 
 fn project_name(chosen: &Path) -> Option<String> {
@@ -142,6 +154,33 @@ mod tests {
         let scratch = Scratch::new();
         let result = Location::for_save_as(&scratch.path().join(".sibilant"));
         assert_eq!(result, Err(SaveError::NoName));
+    }
+
+    #[test]
+    fn a_path_in_the_project_folder_becomes_relative_with_slashes() {
+        let location = Location::of_file(Path::new("songs/MySong/MySong.sibilant"));
+        let kick = Path::new("songs/MySong").join("audio").join("Kick.wav");
+        assert_eq!(location.relative(&kick), Some("audio/Kick.wav".into()));
+        assert_eq!(location.relative(Path::new("songs/Other/Kick.wav")), None);
+    }
+
+    #[test]
+    fn a_stored_path_resolves_only_inside_the_project_folder() {
+        let location = Location::of_file(Path::new("songs/MySong/MySong.sibilant"));
+        assert_eq!(
+            location.resolve("audio/Kick.wav"),
+            Some(Path::new("songs/MySong").join("audio").join("Kick.wav"))
+        );
+        for outside in [
+            "../Kick.wav",
+            "audio/../../Kick.wav",
+            "/Kick.wav",
+            "./Kick.wav",
+            "audio//Kick.wav",
+            "",
+        ] {
+            assert_eq!(location.resolve(outside), None, "{outside}");
+        }
     }
 
     #[test]
