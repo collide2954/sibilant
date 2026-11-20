@@ -31,6 +31,22 @@ impl Project {
         })
     }
 
+    pub fn restore_clip(
+        &self,
+        track: TrackId,
+        start: Position<Musical>,
+        clip: Clip,
+    ) -> Result<Self, EditError> {
+        let found = self.track(track).ok_or(EditError::UnknownTrack(track))?;
+        self.check_clip(&clip)?;
+        if found.timeline.contains_key(&start) {
+            return Err(EditError::ClipAt(track, start));
+        }
+        self.edit_track(track, |track| {
+            track.timeline.insert(start, Arc::new(clip));
+        })
+    }
+
     pub fn remove_clip(&self, track: TrackId, start: Position<Musical>) -> Result<Self, EditError> {
         let found = self.track(track).ok_or(EditError::UnknownTrack(track))?;
         if !found.timeline.contains_key(&start) {
@@ -231,6 +247,38 @@ mod tests {
         assert_eq!(
             project.remove_clip(unknown, quarter_notes(0)),
             Err(EditError::UnknownTrack(unknown))
+        );
+    }
+
+    #[test]
+    fn restoring_a_clip_keeps_the_clips_around_it_as_they_are() {
+        let project = placed(&[(0, clip(0, 4))])
+            .restore_clip(TRACK, quarter_notes(2), clip(20, 4))
+            .unwrap();
+        assert_eq!(
+            timeline(&project),
+            [
+                (quarter_notes(0), clip(0, 4)),
+                (quarter_notes(2), clip(20, 4))
+            ]
+        );
+    }
+
+    #[test]
+    fn restoring_a_clip_needs_a_known_track_a_valid_region_and_a_free_start() {
+        let unknown = TrackId::new(9);
+        let project = placed(&[(0, clip(0, 4))]);
+        assert_eq!(
+            project.restore_clip(unknown, quarter_notes(8), clip(0, 2)),
+            Err(EditError::UnknownTrack(unknown))
+        );
+        assert_eq!(
+            project.restore_clip(TRACK, quarter_notes(8), clip(99, 2)),
+            Err(EditError::RegionOutsideSource(TAPE))
+        );
+        assert_eq!(
+            project.restore_clip(TRACK, quarter_notes(0), clip(10, 2)),
+            Err(EditError::ClipAt(TRACK, quarter_notes(0)))
         );
     }
 

@@ -6,6 +6,7 @@ use crate::time::{Musical, Position};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditError {
+    ClipAt(TrackId, Position<Musical>),
     DuplicateScene(SceneId),
     DuplicateSource(SourceId),
     DuplicateTrack(TrackId),
@@ -20,6 +21,13 @@ pub enum EditError {
 impl fmt::Display for EditError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ClipAt(track, start) => {
+                write!(
+                    f,
+                    "{track} already has a clip that starts at tick {}",
+                    start.ticks()
+                )
+            }
             Self::DuplicateScene(scene) => write!(f, "{scene} already exists"),
             Self::DuplicateSource(source) => write!(f, "{source} already exists"),
             Self::DuplicateTrack(track) => write!(f, "{track} already exists"),
@@ -80,6 +88,15 @@ mod tests {
     #[test]
     fn the_error_tells_that_a_clip_is_empty() {
         assert_eq!(EditError::EmptyClip.to_string(), "the clip has no length");
+    }
+
+    #[test]
+    fn the_error_tells_where_a_clip_already_starts() {
+        let error = EditError::ClipAt(TrackId::new(1), Position::from_ticks(705_600));
+        assert_eq!(
+            error.to_string(),
+            "track 1 already has a clip that starts at tick 705600"
+        );
     }
 
     #[test]
