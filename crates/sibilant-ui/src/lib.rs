@@ -6,3 +6,4 @@ mod style;
 pub mod theme;
 pub mod timeline;
 pub mod track_area;
+pub mod transport;
