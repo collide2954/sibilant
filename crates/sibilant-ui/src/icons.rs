@@ -5,6 +5,11 @@ pub const FILE: &[u8] = include_bytes!("../fonts/lucide.ttf");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Icon {
+    AudioFile,
+    ChevronDown,
+    ChevronRight,
+    Folder,
+    FolderOpen,
     Loop,
     Metronome,
     Pause,
@@ -15,7 +20,12 @@ pub enum Icon {
 }
 
 impl Icon {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 12] = [
+        Self::AudioFile,
+        Self::ChevronDown,
+        Self::ChevronRight,
+        Self::Folder,
+        Self::FolderOpen,
         Self::Loop,
         Self::Metronome,
         Self::Pause,
@@ -27,6 +37,11 @@ impl Icon {
 
     pub const fn codepoint(self) -> char {
         match self {
+            Self::AudioFile => '\u{e31a}',
+            Self::ChevronDown => '\u{e06d}',
+            Self::ChevronRight => '\u{e06f}',
+            Self::Folder => '\u{e0d7}',
+            Self::FolderOpen => '\u{e247}',
             Self::Loop => '\u{e146}',
             Self::Metronome => '\u{e6bc}',
             Self::Pause => '\u{e12e}',
@@ -45,7 +60,12 @@ mod tests {
 
     use crate::icons::{self, Icon};
 
-    const LUCIDE_NAMES: [(Icon, &str); 7] = [
+    const LUCIDE_NAMES: [(Icon, &str); 12] = [
+        (Icon::AudioFile, "file-audio-2"),
+        (Icon::ChevronDown, "chevron-down"),
+        (Icon::ChevronRight, "chevron-right"),
+        (Icon::Folder, "folder"),
+        (Icon::FolderOpen, "folder-open"),
         (Icon::Loop, "repeat"),
         (Icon::Metronome, "metronome"),
         (Icon::Pause, "pause"),
