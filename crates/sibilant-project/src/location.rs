@@ -1,9 +1,9 @@
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::SaveError;
 
 pub const EXTENSION: &str = "sibilant";
-const AUDIO: &str = "audio";
+pub(crate) const AUDIO: &str = "audio";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Location {
@@ -46,6 +46,19 @@ impl Location {
         self.file
             .file_stem()
             .map_or_default(|stem| stem.to_string_lossy().into_owned())
+    }
+
+    pub(crate) fn relative(&self, path: &Path) -> Option<String> {
+        let parts = path
+            .strip_prefix(self.folder())
+            .ok()?
+            .components()
+            .map(|component| match component {
+                Component::Normal(part) => Some(part.to_string_lossy()),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()?;
+        Some(parts.join("/"))
     }
 }
 

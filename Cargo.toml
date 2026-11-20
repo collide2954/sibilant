@@ -30,6 +30,8 @@ png = "0.18.1"
 proptest = { version = "1.12.0", default-features = false, features = ["std"] }
 rtrb = "0.4.1"
 rubato = "5.1.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
 sibilant-core = { path = "crates/sibilant-core" }
 sibilant-device = { path = "crates/sibilant-device" }
 sibilant-engine = { path = "crates/sibilant-engine" }
