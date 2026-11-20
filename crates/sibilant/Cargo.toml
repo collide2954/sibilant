@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 iced.workspace = true
+sibilant-core.workspace = true
 sibilant-ui.workspace = true
 
 [dev-dependencies]

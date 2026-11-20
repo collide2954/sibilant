@@ -2366,6 +2366,7 @@ version = "0.0.0"
 dependencies = [
  "iced",
  "iced_test",
+ "sibilant-core",
  "sibilant-ui",
 ]
 
