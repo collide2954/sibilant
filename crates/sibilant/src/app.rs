@@ -22,6 +22,10 @@ use sibilant_ui::{shell, track_area};
 use crate::audio::Audio;
 use crate::library::{self, LoadedAudio};
 
+mod preview;
+
+use preview::Previews;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Placement {
     pub(crate) track: Option<TrackId>,
@@ -35,6 +39,7 @@ pub(crate) enum Message {
     Places(Vec<Place>),
     Listed(PathBuf, Result<Vec<Entry>, String>),
     Loaded(Placement, Result<LoadedAudio, String>),
+    PreviewLoaded(PathBuf, Result<LoadedAudio, String>),
     DragEnded,
     Frame,
 }
@@ -47,6 +52,7 @@ pub(crate) struct App {
     viewport: Viewport,
     browser: Browser,
     dragging: Option<PathBuf>,
+    previews: Previews,
     pool: BTreeMap<SourceId, Arc<AudioBuffer>>,
     waveforms: Waveforms,
     audio: Option<Audio>,
@@ -65,6 +71,7 @@ impl Default for App {
             viewport: Viewport::default(),
             browser: Browser::default(),
             dragging: None,
+            previews: Previews::default(),
             pool: BTreeMap::new(),
             waveforms: Waveforms::new(),
             audio: None,
@@ -100,6 +107,7 @@ impl App {
             Message::Listed(folder, result) => self.browser.listed(folder, result),
             Message::Loaded(placement, Ok(loaded)) => self.place(placement, loaded),
             Message::Loaded(_, Err(message)) => self.browser.set_notice(Some(message)),
+            Message::PreviewLoaded(file, result) => self.preview_loaded(file, result),
             Message::DragEnded => self.dragging = None,
             Message::Frame => {
                 if let Some(audio) = self.audio.as_mut() {
@@ -109,6 +117,7 @@ impl App {
                     .audio
                     .as_ref()
                     .is_some_and(|audio| audio.controller.is_playing());
+                self.check_preview();
             }
         }
         Task::none()
@@ -118,6 +127,10 @@ impl App {
         let Some(path) = self.dragging.take() else {
             return Task::none();
         };
+        if let Some(previewed) = self.previews.cached(&path).cloned() {
+            self.place(placement, previewed);
+            return Task::none();
+        }
         let sample_rate = self.audio.as_ref().map(Audio::sample_rate);
         Task::perform(
             async move { library::load(&path, sample_rate) },
@@ -185,7 +198,12 @@ impl App {
                 self.browser.set_notice(None);
                 Task::none()
             }
-            Some(Request::Preview(_) | Request::StopPreview) | None => Task::none(),
+            Some(Request::Preview(file)) => self.start_preview(file),
+            Some(Request::StopPreview) => {
+                self.stop_preview();
+                Task::none()
+            }
+            None => Task::none(),
         }
     }
 
@@ -193,8 +211,7 @@ impl App {
         let shortcuts = keyboard::listen()
             .filter_map(Command::from_key_event)
             .map(Message::Command);
-        let frames = self
-            .playing
+        let frames = (self.playing || self.previews.is_playing())
             .then(|| window::frames().map(|_| Message::Frame));
         let drag_end = self
             .dragging
@@ -236,6 +253,7 @@ impl App {
                 self.send(engine::Command::SetMetronome(self.metronome));
             }
             Command::Drop { track, start } => return self.import(Placement { track, start }),
+            Command::StopPreview => self.stop_preview(),
         }
         Task::none()
     }
@@ -319,24 +337,21 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
+    use iced::Task;
     use iced_test::simulator;
     use sibilant_core::project::{Project, Track, TrackId};
     use sibilant_core::time::{Duration, Musical, Position};
     use sibilant_engine::arrangement::AudioBuffer;
-    use sibilant_media::Peaks;
-
-    use crate::app::{Placement, release_that_no_track_takes};
-    use crate::library::LoadedAudio;
     use sibilant_engine::engine::Engine;
-    use sibilant_media::{Entry, EntryKind, Place};
+    use sibilant_media::{Entry, EntryKind, Peaks, Place};
     use sibilant_ui::browser;
     use sibilant_ui::command::Command;
-
-    use crate::app::Message;
-    use crate::audio::Audio;
+    use sibilant_ui::icons::Icon;
     use sibilant_ui::theme::Palette;
 
-    use crate::app::App;
+    use crate::app::{App, Message, Placement, release_that_no_track_takes};
+    use crate::audio::Audio;
+    use crate::library::LoadedAudio;
 
     fn project(app: &App) -> &Project {
         app.history.present()
@@ -427,18 +442,146 @@ mod tests {
         assert!(simulator(app.view()).find("kick.wav").is_ok());
     }
 
-    fn loaded(name: &str) -> LoadedAudio {
-        let samples = vec![0.5; 48_000];
+    fn audio_file(path: PathBuf, frames: u32) -> LoadedAudio {
+        let samples = vec![0.5; usize::try_from(frames).unwrap()];
+        let name = path.file_stem().unwrap().to_string_lossy().into_owned();
         LoadedAudio {
-            path: PathBuf::from(format!("{name}.wav")),
-            name: name.into(),
-            length: Duration::from_seconds(1),
+            path,
+            name,
+            length: Duration::from_frames(i64::from(frames), 48_000),
             playback: Arc::new(AudioBuffer::new(vec![samples.clone()])),
             peaks: Arc::new(Peaks::of(&sibilant_media::Audio::new(
                 48_000,
                 vec![samples],
             ))),
         }
+    }
+
+    fn loaded(name: &str) -> LoadedAudio {
+        audio_file(PathBuf::from(format!("{name}.wav")), 48_000)
+    }
+
+    fn click(app: &mut App, file: PathBuf) -> Task<Message> {
+        let _ = app.update(Message::Browser(browser::Event::Press(file.clone())));
+        app.update(Message::Browser(browser::Event::Release(file)))
+    }
+
+    fn list_kick(app: &mut App) {
+        let _ = app.update(Message::Places(vec![Place {
+            name: "Music".into(),
+            path: music(),
+        }]));
+        let entry = Entry {
+            name: "kick.wav".into(),
+            path: kick(),
+            kind: EntryKind::Audio,
+        };
+        let _ = app.update(Message::Listed(music(), Ok(vec![entry])));
+    }
+
+    fn shows_a_speaker(app: &App) -> bool {
+        let speaker = Icon::Speaker.codepoint().to_string();
+        simulator(app.view()).find(speaker.as_str()).is_ok()
+    }
+
+    fn hear_kick(app: &mut App, frames: u32) {
+        let _ = click(app, kick());
+        let _ = app.update(Message::PreviewLoaded(
+            kick(),
+            Ok(audio_file(kick(), frames)),
+        ));
+    }
+
+    fn render(engine: &mut Engine, frames: usize) -> Vec<f32> {
+        let mut buffer = vec![0.0; frames * 2];
+        engine.process(&mut buffer, 2);
+        buffer
+    }
+
+    #[test]
+    fn a_click_on_a_file_loads_it_for_a_preview_in_the_background() {
+        let (mut app, _engine) = with_simulated_audio();
+        assert_eq!(click(&mut app, kick()).units(), 1);
+    }
+
+    #[test]
+    fn a_loaded_preview_plays_in_the_engine_with_a_speaker_on_its_file() {
+        let (mut app, mut engine) = with_simulated_audio();
+        list_kick(&mut app);
+        hear_kick(&mut app, 48_000);
+        assert!(loudest(&render(&mut engine, 480)) > 0.2);
+        assert!(shows_a_speaker(&app));
+    }
+
+    #[test]
+    fn a_preview_stopped_before_it_loaded_does_not_play() {
+        let (mut app, mut engine) = with_simulated_audio();
+        let _ = click(&mut app, kick());
+        run(&mut app, Command::StopPreview);
+        let _ = app.update(Message::PreviewLoaded(
+            kick(),
+            Ok(audio_file(kick(), 48_000)),
+        ));
+        assert_eq!(loudest(&render(&mut engine, 480)), 0.0);
+    }
+
+    #[test]
+    fn a_second_click_on_the_file_that_plays_stops_it() {
+        let (mut app, mut engine) = with_simulated_audio();
+        list_kick(&mut app);
+        hear_kick(&mut app, 48_000);
+        let _ = render(&mut engine, 480);
+        let _ = click(&mut app, kick());
+        assert_eq!(loudest(&render(&mut engine, 480)[400..]), 0.0);
+        assert!(!shows_a_speaker(&app));
+    }
+
+    #[test]
+    fn escape_stops_the_preview() {
+        let (mut app, mut engine) = with_simulated_audio();
+        hear_kick(&mut app, 48_000);
+        let _ = render(&mut engine, 480);
+        run(&mut app, Command::StopPreview);
+        assert_eq!(loudest(&render(&mut engine, 480)[400..]), 0.0);
+    }
+
+    #[test]
+    fn the_speaker_stays_until_the_engine_ends_the_preview() {
+        let (mut app, mut engine) = with_simulated_audio();
+        list_kick(&mut app);
+        hear_kick(&mut app, 100);
+        let _ = app.update(Message::Frame);
+        assert!(shows_a_speaker(&app));
+        let _ = render(&mut engine, 480);
+        let _ = app.update(Message::Frame);
+        assert!(!shows_a_speaker(&app));
+    }
+
+    #[test]
+    fn a_previewed_file_goes_on_a_track_without_a_second_load() {
+        let (mut app, _engine) = with_simulated_audio();
+        hear_kick(&mut app, 48_000);
+        grab(&mut app);
+        let track = first_track(&app).id();
+        let drop = Command::Drop {
+            track: Some(track),
+            start: Position::START,
+        };
+        assert_eq!(app.update(Message::Command(drop)).units(), 0);
+        assert_eq!(first_track(&app).timeline().len(), 1);
+    }
+
+    #[test]
+    fn a_preview_that_cannot_be_loaded_tells_why() {
+        let (mut app, _engine) = with_simulated_audio();
+        let _ = click(&mut app, kick());
+        let failure = Err("kick.wav: not a WAV file".into());
+        let _ = app.update(Message::PreviewLoaded(kick(), failure));
+        assert!(
+            simulator(app.view())
+                .find("kick.wav: not a WAV file")
+                .is_ok()
+        );
     }
 
     fn place(app: &mut App, track: Option<TrackId>, start: Position<Musical>, name: &str) {

@@ -15,6 +15,7 @@ pub enum Command {
     },
     PlayOrStop,
     Redo,
+    StopPreview,
     ScrollTimeline {
         pixels: f32,
     },
@@ -70,6 +71,7 @@ impl Command {
             Key::Character(character) if modifiers.command() => {
                 Self::from_command_character(character, modifiers.shift())
             }
+            Key::Named(key::Named::Escape) => Some(Self::StopPreview),
             _ => None,
         }
     }
@@ -142,6 +144,15 @@ mod tests {
     #[test]
     fn command_space_is_not_a_transport_shortcut() {
         assert_eq!(space(Modifiers::COMMAND), None);
+    }
+
+    #[test]
+    fn escape_stops_the_preview() {
+        let escape = Key::Named(key::Named::Escape);
+        assert_eq!(
+            Command::from_shortcut(&escape, Modifiers::empty()),
+            Some(Command::StopPreview)
+        );
     }
 
     #[test]
