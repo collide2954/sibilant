@@ -1,3 +1,4 @@
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::{EditError, Project, SourceId};
@@ -6,15 +7,15 @@ use crate::time::{Clock, Duration};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AudioSource {
     id: SourceId,
-    file_name: String,
+    path: PathBuf,
     length: Duration<Clock>,
 }
 
 impl AudioSource {
-    pub fn new(id: SourceId, file_name: impl Into<String>, length: Duration<Clock>) -> Self {
+    pub fn new(id: SourceId, path: impl Into<PathBuf>, length: Duration<Clock>) -> Self {
         Self {
             id,
-            file_name: file_name.into(),
+            path: path.into(),
             length,
         }
     }
@@ -23,8 +24,8 @@ impl AudioSource {
         self.id
     }
 
-    pub fn file_name(&self) -> &str {
-        &self.file_name
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 
     pub fn length(&self) -> Duration<Clock> {
@@ -53,6 +54,8 @@ impl Project {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use crate::project::{AudioSource, EditError, Project, SourceId};
     use crate::time::Duration;
 
@@ -70,9 +73,15 @@ mod tests {
         let project = Project::default().add_source(kick()).unwrap();
         let source = project.source(SourceId::new(1)).unwrap();
         assert_eq!(source.id(), SourceId::new(1));
-        assert_eq!(source.file_name(), "kick.wav");
         assert_eq!(source.length(), Duration::from_seconds(2));
         assert!(project.source(SourceId::new(2)).is_none());
+    }
+
+    #[test]
+    fn a_source_keeps_the_path_of_its_audio_file() {
+        let path = Path::new("samples").join("kick.wav");
+        let source = AudioSource::new(SourceId::new(1), &path, Duration::from_seconds(2));
+        assert_eq!(source.path(), path);
     }
 
     #[test]
