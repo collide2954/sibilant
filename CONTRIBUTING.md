@@ -5,13 +5,21 @@ This document gives the rules for changes to Sibilant. All contributors must obe
 ## Prepare your computer
 
 1. Install Rust with [rustup](https://rustup.rs).
-2. Install cargo-deny:
+2. On Linux, install the ALSA development files:
+
+   ```sh
+   sudo apt-get install libasound2-dev
+   ```
+
+   On Fedora, install `alsa-lib-devel` with `dnf` instead.
+
+3. Install cargo-deny:
 
    ```sh
    cargo install cargo-deny --locked --version 0.22.0
    ```
 
-3. Activate the Git hooks of the repository:
+4. Activate the Git hooks of the repository:
 
    ```sh
    cargo xtask install-hooks
