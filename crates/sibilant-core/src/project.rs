@@ -30,6 +30,20 @@ impl Project {
         project.tracks.push(Arc::new(Track::new(id, name.into())));
         Ok(project)
     }
+
+    pub fn remove_track(&self, id: TrackId) -> Result<Self, EditError> {
+        let index = self.track_index(id)?;
+        let mut project = self.clone();
+        project.tracks.remove(index);
+        Ok(project)
+    }
+
+    fn track_index(&self, id: TrackId) -> Result<usize, EditError> {
+        self.tracks
+            .iter()
+            .position(|track| track.id() == id)
+            .ok_or(EditError::UnknownTrack(id))
+    }
 }
 
 #[cfg(test)]
@@ -85,8 +99,26 @@ mod tests {
     }
 
     #[test]
-    fn the_error_names_the_track() {
-        let error = EditError::DuplicateTrack(TrackId::new(7));
-        assert_eq!(error.to_string(), "track 7 already exists");
+    fn removing_a_track_takes_it_out_of_the_list() {
+        let project = with_tracks(&["Drums", "Bass", "Keys"]);
+        let project = project.remove_track(TrackId::new(2)).unwrap();
+        assert_eq!(track_names(&project), ["Drums", "Keys"]);
+    }
+
+    #[test]
+    fn removing_an_unknown_track_is_an_error() {
+        let project = with_tracks(&["Drums"]);
+        assert_eq!(
+            project.remove_track(TrackId::new(9)),
+            Err(EditError::UnknownTrack(TrackId::new(9)))
+        );
+    }
+
+    #[test]
+    fn the_errors_name_the_track() {
+        let duplicate = EditError::DuplicateTrack(TrackId::new(7));
+        let unknown = EditError::UnknownTrack(TrackId::new(9));
+        assert_eq!(duplicate.to_string(), "track 7 already exists");
+        assert_eq!(unknown.to_string(), "track 9 does not exist");
     }
 }
