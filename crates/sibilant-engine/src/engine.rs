@@ -131,6 +131,7 @@ fn frames_in(output: &[f32], channels: usize) -> i64 {
 
 #[cfg(test)]
 mod tests {
+    use assert_no_alloc::assert_no_alloc;
     use sibilant_core::time::{TempoMap, TimeSignatureMap};
 
     use crate::engine::{self, Command, Controller, Engine};
@@ -237,6 +238,19 @@ mod tests {
         let expected = run(&mut whole, 48_000);
         let actual: Vec<f32> = (0..480).flat_map(|_| run(&mut pieces, 100)).collect();
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn filling_buffers_never_allocates_memory() {
+        let (mut controller, mut engine) = metronome_on();
+        let mut buffer = vec![0.0; 1_024];
+        assert_no_alloc(|| {
+            for _ in 0..500 {
+                engine.process(&mut buffer, 2);
+            }
+        });
+        controller.send(Command::TogglePlay);
+        assert_no_alloc(|| engine.process(&mut buffer, 2));
     }
 
     #[test]
