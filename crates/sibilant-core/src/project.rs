@@ -39,6 +39,15 @@ impl Project {
         Ok(project)
     }
 
+    pub fn move_track(&self, id: TrackId, index: usize) -> Result<Self, EditError> {
+        let from = self.track_index(id)?;
+        let mut project = self.clone();
+        let track = project.tracks.remove(from);
+        let to = index.min(project.tracks.len());
+        project.tracks.insert(to, track);
+        Ok(project)
+    }
+
     pub fn rename_track(&self, id: TrackId, name: impl Into<String>) -> Result<Self, EditError> {
         let name = name.into();
         self.edit_track(id, |track| track.name = name)
@@ -142,6 +151,31 @@ mod tests {
         let project = with_tracks(&["Drums"]);
         assert_eq!(
             project.rename_track(TrackId::new(9), "Bass"),
+            Err(EditError::UnknownTrack(TrackId::new(9)))
+        );
+    }
+
+    #[test]
+    fn moving_a_track_puts_it_at_the_new_index() {
+        let project = with_tracks(&["Drums", "Bass", "Keys"]);
+        let down = project.move_track(TrackId::new(1), 2).unwrap();
+        let up = project.move_track(TrackId::new(3), 0).unwrap();
+        assert_eq!(track_names(&down), ["Bass", "Keys", "Drums"]);
+        assert_eq!(track_names(&up), ["Keys", "Drums", "Bass"]);
+    }
+
+    #[test]
+    fn moving_a_track_past_the_end_puts_it_last() {
+        let project = with_tracks(&["Drums", "Bass", "Keys"]);
+        let project = project.move_track(TrackId::new(1), 10).unwrap();
+        assert_eq!(track_names(&project), ["Bass", "Keys", "Drums"]);
+    }
+
+    #[test]
+    fn moving_an_unknown_track_is_an_error() {
+        let project = with_tracks(&["Drums"]);
+        assert_eq!(
+            project.move_track(TrackId::new(9), 0),
             Err(EditError::UnknownTrack(TrackId::new(9)))
         );
     }
