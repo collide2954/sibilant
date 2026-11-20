@@ -9,10 +9,12 @@ publish.workspace = true
 
 [dependencies]
 iced.workspace = true
+rfd.workspace = true
 sibilant-core.workspace = true
 sibilant-device.workspace = true
 sibilant-engine.workspace = true
 sibilant-media.workspace = true
+sibilant-project.workspace = true
 sibilant-ui.workspace = true
 
 [dev-dependencies]

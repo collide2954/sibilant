@@ -28,6 +28,7 @@ iced = { version = "0.14.0", default-features = false, features = [
 iced_test = "0.14.0"
 png = "0.18.1"
 proptest = { version = "1.12.0", default-features = false, features = ["std"] }
+rfd = "0.18.0"
 rtrb = "0.4.1"
 rubato = "5.1.0"
 serde = { version = "1.0.229", features = ["derive"] }
@@ -36,6 +37,7 @@ sibilant-core = { path = "crates/sibilant-core" }
 sibilant-device = { path = "crates/sibilant-device" }
 sibilant-engine = { path = "crates/sibilant-engine" }
 sibilant-media = { path = "crates/sibilant-media" }
+sibilant-project = { path = "crates/sibilant-project" }
 sibilant-ui = { path = "crates/sibilant-ui" }
 skrifa = { version = "0.44.0", default-features = false, features = ["std"] }
 

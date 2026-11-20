@@ -22,10 +22,13 @@ use sibilant_ui::{shell, track_area};
 use crate::audio::Audio;
 use crate::library::{self, LoadedAudio};
 
+mod dialogs;
 mod document;
+mod file;
 mod preview;
 
 use document::Document;
+use file::{Saving, Target};
 use preview::Previews;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -42,6 +45,8 @@ pub(crate) enum Message {
     Listed(PathBuf, Result<Vec<Entry>, String>),
     Loaded(Placement, Result<LoadedAudio, String>),
     PreviewLoaded(PathBuf, Result<LoadedAudio, String>),
+    SaveAs(Option<PathBuf>),
+    Saved(Box<Saving>),
     DragEnded,
     Frame,
 }
@@ -61,6 +66,7 @@ pub(crate) struct App {
     audio: Option<Audio>,
     metronome: bool,
     playing: bool,
+    saving: bool,
 }
 
 impl Default for App {
@@ -81,6 +87,7 @@ impl Default for App {
             audio: None,
             metronome: false,
             playing: false,
+            saving: false,
         }
     }
 }
@@ -117,6 +124,9 @@ impl App {
             Message::Loaded(placement, Ok(loaded)) => self.place(placement, loaded),
             Message::Loaded(_, Err(message)) => self.browser.set_notice(Some(message)),
             Message::PreviewLoaded(file, result) => self.preview_loaded(file, result),
+            Message::SaveAs(Some(chosen)) => return self.save_to(Target::Chosen(chosen)),
+            Message::SaveAs(None) => {}
+            Message::Saved(saving) => self.finish_saving(*saving),
             Message::DragEnded => self.dragging = None,
             Message::Frame => {
                 if let Some(audio) = self.audio.as_mut() {
@@ -266,6 +276,8 @@ impl App {
                 self.send(engine::Command::SetMetronome(self.metronome));
             }
             Command::Drop { track, start } => return self.import(Placement { track, start }),
+            Command::Save => return self.save(),
+            Command::SaveAs => return self.save_as(),
             Command::StopPreview => self.stop_preview(),
         }
         Task::none()
@@ -361,11 +373,13 @@ mod tests {
     use sibilant_engine::arrangement::AudioBuffer;
     use sibilant_engine::engine::Engine;
     use sibilant_media::{Entry, EntryKind, Peaks, Place};
+    use sibilant_project::{Copies, Location};
     use sibilant_ui::browser;
     use sibilant_ui::command::Command;
     use sibilant_ui::icons::Icon;
     use sibilant_ui::theme::Palette;
 
+    use crate::app::file::{Saved, Saving};
     use crate::app::{App, Message, Placement, release_that_no_track_takes};
     use crate::audio::Audio;
     use crate::library::LoadedAudio;
@@ -876,6 +890,96 @@ mod tests {
         assert!(!first_track(&app).mix().mute);
         run(&mut app, Command::Undo);
         assert!(first_track(&app).mix().mute);
+    }
+
+    fn my_song() -> PathBuf {
+        PathBuf::from("songs")
+            .join("MySong")
+            .join("MySong.sibilant")
+    }
+
+    fn finish_saving(app: &mut App, project: Project, result: Result<Saved, String>) {
+        let saving = Saving { project, result };
+        let _ = app.update(Message::Saved(Box::new(saving)));
+    }
+
+    fn saved_as_my_song(app: &mut App, project: Project) {
+        let saved = Saved {
+            location: Location::of_file(my_song()),
+            copies: Copies::default(),
+        };
+        finish_saving(app, project, Ok(saved));
+    }
+
+    #[test]
+    fn save_of_a_project_without_a_file_asks_where_to_save_it() {
+        let mut app = App::default();
+        assert_eq!(app.update(Message::Command(Command::Save)).units(), 1);
+        assert!(!app.saving);
+    }
+
+    #[test]
+    fn save_as_asks_where_to_save_the_project() {
+        let mut app = App::default();
+        assert_eq!(app.update(Message::Command(Command::SaveAs)).units(), 1);
+        assert!(!app.saving);
+    }
+
+    #[test]
+    fn a_chosen_file_saves_the_project_in_the_background() {
+        let mut app = App::default();
+        assert_eq!(app.update(Message::SaveAs(Some(my_song()))).units(), 1);
+        assert!(app.saving);
+    }
+
+    #[test]
+    fn a_closed_save_dialog_saves_nothing() {
+        let mut app = App::default();
+        assert_eq!(app.update(Message::SaveAs(None)).units(), 0);
+        assert!(!app.saving);
+    }
+
+    #[test]
+    fn a_saved_project_shows_its_name_and_saves_again_without_a_dialog() {
+        let mut app = App::default();
+        let present = project(&app).clone();
+        saved_as_my_song(&mut app, present);
+        assert_eq!(app.title(), "MySong — Sibilant");
+        assert_eq!(app.update(Message::Command(Command::Save)).units(), 1);
+        assert!(app.saving);
+    }
+
+    #[test]
+    fn changes_made_during_a_save_stay_unsaved() {
+        let mut app = App::default();
+        let at_start = project(&app).clone();
+        let _ = app.update(Message::SaveAs(Some(my_song())));
+        run(&mut app, Command::AddTrack);
+        saved_as_my_song(&mut app, at_start);
+        assert_eq!(app.title(), "● MySong — Sibilant");
+        assert!(!app.saving);
+    }
+
+    #[test]
+    fn a_second_save_waits_until_the_first_is_done() {
+        let mut app = App::default();
+        let _ = app.update(Message::SaveAs(Some(my_song())));
+        assert_eq!(app.update(Message::SaveAs(Some(my_song()))).units(), 0);
+    }
+
+    #[test]
+    fn a_failed_save_tells_why_in_the_browser() {
+        let mut app = App::default();
+        let present = project(&app).clone();
+        let _ = app.update(Message::SaveAs(Some(my_song())));
+        finish_saving(
+            &mut app,
+            present,
+            Err("cannot write the project file".into()),
+        );
+        let notice = "Sibilant did not save the project: cannot write the project file";
+        assert!(simulator(app.view()).find(notice).is_ok());
+        assert!(!app.saving);
     }
 
     #[test]

@@ -15,6 +15,8 @@ pub enum Command {
     },
     PlayOrStop,
     Redo,
+    Save,
+    SaveAs,
     StopPreview,
     ScrollTimeline {
         pixels: f32,
@@ -78,6 +80,8 @@ impl Command {
 
     fn from_command_character(character: &str, shift: bool) -> Option<Self> {
         match character.to_ascii_lowercase().as_str() {
+            "s" if !shift => Some(Self::Save),
+            "s" => Some(Self::SaveAs),
             "t" if !shift => Some(Self::AddTrack),
             "z" if !shift => Some(Self::Undo),
             "z" => Some(Self::Redo),
@@ -113,6 +117,14 @@ mod tests {
         let modifiers = Modifiers::COMMAND | Modifiers::SHIFT;
         assert_eq!(press("z", modifiers), Some(Command::Redo));
         assert_eq!(press("Z", modifiers), Some(Command::Redo));
+    }
+
+    #[test]
+    fn command_s_saves_and_command_shift_s_saves_under_a_new_name() {
+        let shift = Modifiers::COMMAND | Modifiers::SHIFT;
+        assert_eq!(press("s", Modifiers::COMMAND), Some(Command::Save));
+        assert_eq!(press("s", shift), Some(Command::SaveAs));
+        assert_eq!(press("S", shift), Some(Command::SaveAs));
     }
 
     #[cfg(not(target_os = "macos"))]
