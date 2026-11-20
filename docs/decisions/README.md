@@ -43,3 +43,4 @@ To change a decision, write a new record. Then change the status of the old reco
 | [0026](0026-license-exceptions-for-iced.md) | Accept three crates with the BSL-1.0 and CC0-1.0 licenses for Iced |
 | [0027](0027-unmaintained-crates.md) | Stop on all unmaintained crates and accept two that Iced needs |
 | [0028](0028-track-area-defaults.md) | Start with two audio tracks and give tracks palette colors |
+| [0029](0029-timeline-zoom-and-ruler.md) | Zoom the timeline with Ctrl and the wheel, and show bars and beats |
