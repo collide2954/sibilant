@@ -2438,6 +2438,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sibilant-engine"
+version = "0.0.0"
+dependencies = [
+ "proptest",
+ "sibilant-core",
+]
+
+[[package]]
 name = "sibilant-ui"
 version = "0.0.0"
 dependencies = [
