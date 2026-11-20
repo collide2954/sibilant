@@ -2,7 +2,7 @@ use super::{Duration, Position};
 
 pub const SUPERCLOCKS_PER_SECOND: i64 = 282_240_000;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Clock {}
 
 impl Position<Clock> {

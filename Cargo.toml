@@ -10,6 +10,9 @@ license = "Apache-2.0"
 repository = "https://github.com/collide2954/sibilant"
 publish = false
 
+[workspace.dependencies]
+proptest = { version = "1.12.0", default-features = false, features = ["std"] }
+
 [workspace.lints.rust]
 unreachable_pub = "warn"
 unsafe_code = "deny"

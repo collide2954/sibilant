@@ -2,7 +2,7 @@ use super::{Duration, Position};
 
 pub const TICKS_PER_BEAT: i64 = 705_600;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Musical {}
 
 impl Position<Musical> {

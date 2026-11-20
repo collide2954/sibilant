@@ -3,7 +3,7 @@ use std::ops::{Add, Sub};
 
 use super::Duration;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Position<D>(i64, PhantomData<D>);
 
 impl<D> Position<D> {
