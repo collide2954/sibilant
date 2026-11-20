@@ -33,6 +33,7 @@ rubato = "5.1.0"
 sibilant-core = { path = "crates/sibilant-core" }
 sibilant-device = { path = "crates/sibilant-device" }
 sibilant-engine = { path = "crates/sibilant-engine" }
+sibilant-media = { path = "crates/sibilant-media" }
 sibilant-ui = { path = "crates/sibilant-ui" }
 skrifa = { version = "0.44.0", default-features = false, features = ["std"] }
 

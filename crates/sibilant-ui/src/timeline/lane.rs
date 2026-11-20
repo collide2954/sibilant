@@ -1,10 +1,12 @@
-use super::{View, Viewport, draw_playhead, wheel};
-use crate::command::Command;
-use crate::theme::Palette;
 use iced::keyboard::Modifiers;
 use iced::widget::canvas::{self, Action, Canvas, Event, Frame, Geometry};
 use iced::{Element, Length, Point, Rectangle, Renderer, Size, Theme, mouse};
-use sibilant_core::project::{Project, Track};
+use sibilant_core::project::{Clip, Project, Track};
+use sibilant_core::time::{Musical, Position};
+
+use super::{View, Viewport, draw_playhead, wheel};
+use crate::command::Command;
+use crate::theme::Palette;
 
 const CLIP_INSET: f32 = 2.0;
 const CLIP_GAP: f32 = 1.0;
@@ -64,19 +66,22 @@ impl canvas::Program<Command> for Lane<'_> {
             );
         }
         let color = palette.track_color(self.track.color());
-        for clip in self
+        for clip_box in self
             .view
             .viewport
             .clip_boxes(self.project, self.track, bounds.width)
         {
             let area = Rectangle::new(
-                Point::new(clip.x, CLIP_INSET),
-                Size::new((clip.width - CLIP_GAP).max(1.0), height - 2.0 * CLIP_INSET),
+                Point::new(clip_box.x, CLIP_INSET),
+                Size::new(
+                    (clip_box.width - CLIP_GAP).max(1.0),
+                    height - 2.0 * CLIP_INSET,
+                ),
             );
             frame.fill_rectangle(area.position(), area.size(), iced::Color::from(color));
             frame.with_clip(area, |frame| {
                 frame.fill_text(canvas::Text {
-                    content: clip.name.to_owned(),
+                    content: clip_box.clip.name().to_owned(),
                     position: Point::new(area.x + NAME_INSET, area.y + NAME_INSET),
                     color: palette.on_track_color.into(),
                     size: NAME_SIZE.into(),
@@ -111,7 +116,8 @@ pub fn lane<'a>(
 pub struct ClipBox<'a> {
     pub x: f32,
     pub width: f32,
-    pub name: &'a str,
+    pub start: Position<Musical>,
+    pub clip: &'a Clip,
 }
 
 impl Viewport {
@@ -136,7 +142,8 @@ impl Viewport {
                 let clip_box = ClipBox {
                     x,
                     width: self.x_of(stop) - x,
-                    name: clip.name(),
+                    start,
+                    clip,
                 };
                 (x < width && x + clip_box.width > 0.0).then_some(clip_box)
             })
@@ -201,7 +208,8 @@ mod tests {
         let project = project_with_clips(&[4], 2, TempoMap::default());
         let viewport = Viewport::default();
         let clip_boxes = viewport.clip_boxes(&project, first_track(&project), 1000.0);
-        assert_eq!(clip_boxes[0].name, "Loop");
+        assert_eq!(clip_boxes[0].clip.name(), "Loop");
+        assert_eq!(clip_boxes[0].start, quarter_notes(4));
     }
 
     #[test]

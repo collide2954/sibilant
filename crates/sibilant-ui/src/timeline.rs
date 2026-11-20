@@ -1,6 +1,7 @@
 mod grid;
 mod lane;
 mod ruler;
+mod waveform;
 
 use iced::keyboard::{self, Modifiers};
 use iced::widget::canvas::{Action, Event, Frame};
@@ -13,6 +14,7 @@ use crate::theme::Palette;
 pub use grid::{BarLine, Grid};
 pub use lane::{ClipBox, lane};
 pub use ruler::{HEIGHT as RULER_HEIGHT, ruler};
+pub use waveform::WaveColumn;
 
 fn wheel(
     modifiers: &mut Modifiers,

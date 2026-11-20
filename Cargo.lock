@@ -2742,6 +2742,7 @@ dependencies = [
  "iced_test",
  "png",
  "sibilant-core",
+ "sibilant-media",
  "skrifa 0.44.0",
 ]
 
