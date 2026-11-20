@@ -38,3 +38,4 @@ To change a decision, write a new record. Then change the status of the old reco
 | [0021](0021-tick-resolution-and-time-types.md) | Use 705,600 ticks for each quarter note and typed time values |
 | [0022](0022-time-signatures-at-bar-lines.md) | Change time signatures only at bar lines and use the lower number for the beat |
 | [0023](0023-project-model-of-values.md) | Model the project as values with clips at musical positions |
+| [0024](0024-faders-and-balance-pan.md) | Use faders to +6 dB and a balance pan that keeps the center level |
