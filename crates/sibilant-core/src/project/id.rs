@@ -23,5 +23,6 @@ macro_rules! id {
     };
 }
 
+id!(SceneId, "scene");
 id!(SourceId, "audio source");
 id!(TrackId, "track");
