@@ -37,6 +37,12 @@ impl Duration<Clock> {
     pub const fn superclocks(self) -> i64 {
         self.value()
     }
+
+    pub fn to_frames(self, sample_rate: u32) -> i64 {
+        let frames = (i128::from(self.superclocks()) * i128::from(sample_rate))
+            .div_euclid(i128::from(SUPERCLOCKS_PER_SECOND));
+        i64::try_from(frames).unwrap_or(i64::MAX)
+    }
 }
 
 #[cfg(test)]
@@ -70,6 +76,19 @@ mod tests {
         assert_eq!(
             Duration::<Clock>::from_frames(22_050, 44_100).superclocks(),
             141_120_000
+        );
+    }
+
+    #[test]
+    fn a_duration_holds_the_whole_frames_that_fit_in_it() {
+        assert_eq!(Duration::<Clock>::from_seconds(2).to_frames(48_000), 96_000);
+        assert_eq!(
+            Duration::<Clock>::from_superclocks(7_467).to_frames(37_800),
+            1
+        );
+        assert_eq!(
+            Duration::<Clock>::from_superclocks(7_466).to_frames(37_800),
+            0
         );
     }
 
