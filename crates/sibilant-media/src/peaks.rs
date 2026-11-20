@@ -35,6 +35,7 @@ impl Peak {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Peaks {
     frames: usize,
+    sample_rate: u32,
     levels: Vec<Level>,
 }
 
@@ -56,12 +57,17 @@ impl Peaks {
         }
         Self {
             frames: audio.frames(),
+            sample_rate: audio.sample_rate(),
             levels,
         }
     }
 
     pub fn frames(&self) -> usize {
         self.frames
+    }
+
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate
     }
 
     pub fn range(&self, frames: Range<usize>) -> Option<Peak> {
@@ -195,7 +201,9 @@ mod tests {
     }
 
     #[test]
-    fn the_peaks_know_the_length_of_their_audio() {
-        assert_eq!(peaks(vec![vec![0.0; 1_234]]).frames(), 1_234);
+    fn the_peaks_know_the_length_and_the_sample_rate_of_their_audio() {
+        let peaks = peaks(vec![vec![0.0; 1_234]]);
+        assert_eq!(peaks.frames(), 1_234);
+        assert_eq!(peaks.sample_rate(), 48_000);
     }
 }
