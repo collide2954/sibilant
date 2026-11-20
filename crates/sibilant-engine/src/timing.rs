@@ -29,11 +29,6 @@ impl Timing {
         self.sample_rate
     }
 
-    pub fn frames_in(&self, duration: Duration<Clock>) -> i64 {
-        let scaled = i128::from(duration.superclocks()) * i128::from(self.sample_rate);
-        narrow(scaled.div_euclid(i128::from(SUPERCLOCKS_PER_SECOND)))
-    }
-
     pub fn clock_of_frame(&self, frame: i64) -> Position<Clock> {
         clock_of_frame(self.sample_rate, frame)
     }

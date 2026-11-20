@@ -134,7 +134,7 @@ fn clips(
             (end > first).then(|| ClipPlayback {
                 start: first,
                 end,
-                offset: timing.frames_in(clip.region().start),
+                offset: clip.region().start.to_frames(timing.sample_rate()),
                 fade: fade.min((end - first) / 2).max(1),
                 audio,
             })
