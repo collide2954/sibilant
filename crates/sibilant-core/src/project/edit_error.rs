@@ -19,3 +19,16 @@ impl fmt::Display for EditError {
 }
 
 impl Error for EditError {}
+
+#[cfg(test)]
+mod tests {
+    use crate::project::{EditError, TrackId};
+
+    #[test]
+    fn the_errors_name_the_track() {
+        let duplicate = EditError::DuplicateTrack(TrackId::new(7));
+        let unknown = EditError::UnknownTrack(TrackId::new(9));
+        assert_eq!(duplicate.to_string(), "track 7 already exists");
+        assert_eq!(unknown.to_string(), "track 9 does not exist");
+    }
+}
