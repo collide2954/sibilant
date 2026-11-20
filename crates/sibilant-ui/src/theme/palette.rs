@@ -31,6 +31,12 @@ impl Palette {
     };
 }
 
+impl Default for Palette {
+    fn default() -> Self {
+        Self::GRAPHITE
+    }
+}
+
 impl From<Palette> for iced::Theme {
     fn from(palette: Palette) -> Self {
         Self::custom(
@@ -59,6 +65,11 @@ mod tests {
             ("surface", PALETTE.surface),
             ("raised", PALETTE.raised),
         ]
+    }
+
+    #[test]
+    fn the_default_palette_is_graphite() {
+        assert_eq!(Palette::default(), Palette::GRAPHITE);
     }
 
     #[test]
