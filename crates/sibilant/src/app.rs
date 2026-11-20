@@ -22,8 +22,10 @@ use sibilant_ui::{shell, track_area};
 use crate::audio::Audio;
 use crate::library::{self, LoadedAudio};
 
+mod document;
 mod preview;
 
+use document::Document;
 use preview::Previews;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -48,6 +50,7 @@ pub(crate) enum Message {
 pub(crate) struct App {
     palette: Palette,
     history: History<Project>,
+    document: Document,
     ids: Ids,
     viewport: Viewport,
     browser: Browser,
@@ -66,6 +69,7 @@ impl Default for App {
         let project = Project::new(&mut ids);
         Self {
             palette: Palette::default(),
+            document: Document::new(&project),
             history: History::new(project),
             ids,
             viewport: Viewport::default(),
@@ -301,6 +305,10 @@ impl App {
         };
         let tracks = track_area::view(project, timeline, self.palette).map(Message::Command);
         shell::view(self.palette, transport, browser, tracks)
+    }
+
+    pub(crate) fn title(&self) -> String {
+        self.document.title(self.history.present())
     }
 
     pub(crate) fn theme(&self) -> Theme {
@@ -868,6 +876,16 @@ mod tests {
         assert!(!first_track(&app).mix().mute);
         run(&mut app, Command::Undo);
         assert!(first_track(&app).mix().mute);
+    }
+
+    #[test]
+    fn the_window_title_shows_the_project_and_its_unsaved_changes() {
+        let mut app = App::default();
+        assert_eq!(app.title(), "Untitled — Sibilant");
+        run(&mut app, Command::AddTrack);
+        assert_eq!(app.title(), "● Untitled — Sibilant");
+        run(&mut app, Command::Undo);
+        assert_eq!(app.title(), "Untitled — Sibilant");
     }
 
     #[test]
