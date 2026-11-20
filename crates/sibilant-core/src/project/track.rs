@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use super::timeline::Lane;
 use super::{Clip, EditError, Project, SceneId, TrackId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -8,6 +9,7 @@ pub struct Track {
     pub(super) id: TrackId,
     pub(super) name: String,
     pub(super) slots: BTreeMap<SceneId, Arc<Clip>>,
+    pub(super) timeline: Lane,
 }
 
 impl Track {
@@ -42,6 +44,7 @@ impl Project {
             id,
             name: name.into(),
             slots: BTreeMap::new(),
+            timeline: Lane::new(),
         }));
         Ok(project)
     }

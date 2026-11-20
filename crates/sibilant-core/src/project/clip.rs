@@ -34,6 +34,28 @@ impl Clip {
     pub fn region(&self) -> Region {
         self.region
     }
+
+    pub(super) fn part_before(&self, cut: Duration<Clock>) -> Self {
+        let region = Region {
+            length: cut,
+            ..self.region
+        };
+        Self {
+            region,
+            ..self.clone()
+        }
+    }
+
+    pub(super) fn part_after(&self, cut: Duration<Clock>) -> Self {
+        let region = Region {
+            start: self.region.start + cut,
+            length: self.region.length - cut,
+        };
+        Self {
+            region,
+            ..self.clone()
+        }
+    }
 }
 
 impl Project {

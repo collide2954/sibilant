@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 76e1954f910692ecea36606123cf93807960efe8cf955b2e85874767f0c9ed07 # shrinks to tempo_map = TempoMap { segments: [Segment { start: Position(0, PhantomData<sibilant_core::time::musical::Musical>), clock_start: Position(0, PhantomData<sibilant_core::time::clock::Clock>), tempo: Tempo(30.0) }] }, existing = [], (start, new) = (0, Clip { name: "Tape", source: SourceId(1), region: Region { start: Duration(0, PhantomData<sibilant_core::time::clock::Clock>), length: Duration(4842076001, PhantomData<sibilant_core::time::clock::Clock>) } }), probes = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]

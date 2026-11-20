@@ -14,6 +14,7 @@ Records 0001, 0002, and 0006 set the scope and the form of the project model. Th
 - A track has a name, a mix (gain, pan, mute, and solo), a timeline lane, and one launcher slot for each scene.
 - A clip refers to a region of an audio source. The region has a start in the source and a length. These two values are clock durations.
 - A clip on the timeline starts at a musical position. When the tempo changes, the clip stays at its bar and beat. Its audio plays at its recorded speed, so its end moves.
+- On the timeline, a clip ends at the first tick after its audio. Thus each tick of a clip contains a part of its audio.
 - Clips on a timeline lane do not overlap. A new clip replaces the part of each clip that it covers. If a tempo change moves the end of a clip after the start of the next clip, the next clip cuts it off.
 - Each place has its own copy of a clip. There are no linked clips.
 - Tracks, scenes, and audio sources have typed IDs. The caller supplies each new ID from a counter that does not decrease. Thus an undo never causes the use of an ID two times.

@@ -4,6 +4,7 @@ mod id;
 mod launcher;
 mod scene;
 mod source;
+mod timeline;
 mod track;
 
 use std::collections::BTreeMap;
