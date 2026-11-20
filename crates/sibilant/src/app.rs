@@ -3,8 +3,8 @@ use sibilant_core::history::History;
 use sibilant_core::mix::Mix;
 use sibilant_core::project::{EditError, Ids, Project, TrackId};
 use sibilant_ui::command::Command;
-use sibilant_ui::shell;
 use sibilant_ui::theme::Palette;
+use sibilant_ui::{shell, track_area};
 
 #[derive(Debug)]
 pub(crate) struct App {
@@ -48,7 +48,8 @@ impl App {
     }
 
     pub(crate) fn view(&self) -> Element<'_, Command> {
-        shell::view(self.palette)
+        let tracks = track_area::view(self.history.present(), self.palette);
+        shell::view(self.palette, tracks)
     }
 
     pub(crate) fn theme(&self) -> Theme {
@@ -154,7 +155,7 @@ mod tests {
     fn the_app_shows_the_zones_of_the_main_window() {
         let app = App::default();
         let mut ui = simulator(app.view());
-        for zone in ["Transport", "Browser", "Tracks", "Inspector", "Mixer"] {
+        for zone in ["Transport", "Browser", "Audio 1", "Inspector", "Mixer"] {
             assert!(ui.find(zone).is_ok(), "{zone}");
         }
     }
