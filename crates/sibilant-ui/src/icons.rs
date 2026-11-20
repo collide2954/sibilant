@@ -16,11 +16,12 @@ pub enum Icon {
     Play,
     Record,
     ReturnToStart,
+    Speaker,
     Stop,
 }
 
 impl Icon {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::AudioFile,
         Self::ChevronDown,
         Self::ChevronRight,
@@ -32,6 +33,7 @@ impl Icon {
         Self::Play,
         Self::Record,
         Self::ReturnToStart,
+        Self::Speaker,
         Self::Stop,
     ];
 
@@ -48,6 +50,7 @@ impl Icon {
             Self::Play => '\u{e13c}',
             Self::Record => '\u{e076}',
             Self::ReturnToStart => '\u{e15f}',
+            Self::Speaker => '\u{e1ab}',
             Self::Stop => '\u{e167}',
         }
     }
@@ -60,7 +63,7 @@ mod tests {
 
     use crate::icons::{self, Icon};
 
-    const LUCIDE_NAMES: [(Icon, &str); 12] = [
+    const LUCIDE_NAMES: [(Icon, &str); 13] = [
         (Icon::AudioFile, "file-audio-2"),
         (Icon::ChevronDown, "chevron-down"),
         (Icon::ChevronRight, "chevron-right"),
@@ -72,6 +75,7 @@ mod tests {
         (Icon::Play, "play"),
         (Icon::Record, "circle"),
         (Icon::ReturnToStart, "skip-back"),
+        (Icon::Speaker, "volume-2"),
         (Icon::Stop, "square"),
     ];
 
