@@ -2,13 +2,14 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use super::timeline::Lane;
-use super::{Clip, EditError, Project, SceneId, TrackId};
+use super::{Clip, EditError, Project, SceneId, TrackColor, TrackId};
 use crate::mix::Mix;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Track {
     pub(super) id: TrackId,
     pub(super) name: String,
+    pub(super) color: TrackColor,
     pub(super) mix: Mix,
     pub(super) slots: BTreeMap<SceneId, Arc<Clip>>,
     pub(super) timeline: Lane,
@@ -21,6 +22,10 @@ impl Track {
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub fn color(&self) -> TrackColor {
+        self.color
     }
 
     pub fn mix(&self) -> Mix {
@@ -45,10 +50,15 @@ impl Project {
         if self.track(id).is_some() {
             return Err(EditError::DuplicateTrack(id));
         }
+        let color = self
+            .tracks
+            .last()
+            .map_or(TrackColor::default(), |track| track.color.next());
         let mut project = self.clone();
         project.tracks.push(Arc::new(Track {
             id,
             name: name.into(),
+            color,
             mix: Mix::default(),
             slots: BTreeMap::new(),
             timeline: Lane::new(),
@@ -77,6 +87,10 @@ impl Project {
         self.edit_track(id, |track| track.name = name)
     }
 
+    pub fn set_track_color(&self, id: TrackId, color: TrackColor) -> Result<Self, EditError> {
+        self.edit_track(id, |track| track.color = color)
+    }
+
     pub(super) fn edit_track(
         &self,
         id: TrackId,
@@ -100,7 +114,7 @@ impl Project {
 mod tests {
     use std::sync::Arc;
 
-    use crate::project::{EditError, Project, Track, TrackId};
+    use crate::project::{EditError, Project, Track, TrackColor, TrackId};
 
     fn track_names(project: &Project) -> Vec<&str> {
         project.tracks().map(Track::name).collect()
@@ -204,6 +218,37 @@ mod tests {
         let project = with_tracks(&["Drums"]);
         assert_eq!(
             project.move_track(TrackId::new(9), 0),
+            Err(EditError::UnknownTrack(TrackId::new(9)))
+        );
+    }
+
+    fn colors(project: &Project) -> Vec<u8> {
+        project
+            .tracks()
+            .map(|track| track.color().index())
+            .collect()
+    }
+
+    #[test]
+    fn new_tracks_take_the_colors_of_the_palette_in_turn() {
+        let project = with_tracks(&["Drums", "Bass", "Keys"]);
+        assert_eq!(colors(&project), [0, 1, 2]);
+    }
+
+    #[test]
+    fn a_new_track_takes_the_color_after_the_color_of_the_last_track() {
+        let project = with_tracks(&["Drums", "Bass"])
+            .set_track_color(TrackId::new(2), TrackColor::new(7).unwrap())
+            .and_then(|project| project.add_track(TrackId::new(3), "Keys"))
+            .unwrap();
+        assert_eq!(colors(&project), [0, 7, 8]);
+    }
+
+    #[test]
+    fn setting_the_color_of_an_unknown_track_is_an_error() {
+        let project = with_tracks(&["Drums"]);
+        assert_eq!(
+            project.set_track_color(TrackId::new(9), TrackColor::default()),
             Err(EditError::UnknownTrack(TrackId::new(9)))
         );
     }

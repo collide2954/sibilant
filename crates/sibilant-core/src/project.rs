@@ -7,6 +7,7 @@ mod scene;
 mod source;
 mod timeline;
 mod track;
+mod track_color;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -20,6 +21,7 @@ pub use id::{Ids, SceneId, SourceId, TrackId};
 pub use scene::Scene;
 pub use source::AudioSource;
 pub use track::Track;
+pub use track_color::{TrackColor, TrackColorOutOfRange};
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Project {
