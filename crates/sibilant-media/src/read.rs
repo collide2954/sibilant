@@ -54,6 +54,9 @@ fn read_wav(reader: impl io::Read) -> Result<Audio, ReadError> {
     if !(1..=2).contains(&spec.channels) {
         return Err(ReadError::Channels(spec.channels));
     }
+    if spec.sample_rate == 0 {
+        return Err(ReadError::Format("the sample rate is 0 Hz".into()));
+    }
     let count = usize::from(spec.channels);
     let frames = usize::try_from(reader.duration()).unwrap_or(0);
     let channels = match spec.sample_format {
@@ -171,6 +174,14 @@ mod tests {
     fn files_with_more_than_two_channels_are_refused() {
         let bytes = wav(spec(3, 16, SampleFormat::Int), &[0_i16, 0, 0]);
         assert_eq!(read_wav(Cursor::new(bytes)), Err(ReadError::Channels(3)));
+    }
+
+    #[test]
+    fn files_without_a_sample_rate_are_refused() {
+        let mut bytes = wav(spec(1, 16, SampleFormat::Int), &[0_i16]);
+        bytes[24..32].fill(0);
+        let result = read_wav(Cursor::new(bytes));
+        assert!(matches!(result, Err(ReadError::Format(_))));
     }
 
     #[test]
