@@ -19,7 +19,7 @@ Record 0012 sets a dark graphite theme with one accent color. It does not select
 
 ## Consequences
 
-- The font files and their licenses are in the repository. Inter and JetBrains Mono use the SIL Open Font License 1.1. Lucide uses the ISC license.
+- The font files and their licenses are in the repository. Inter and JetBrains Mono use the SIL Open Font License 1.1. Lucide uses the ISC license, and the MIT license for the icons that come from Feather.
 - The Open Font License lets Sibilant bundle the fonts, but nobody can sell the fonts alone.
 - Text and icons look the same on all three operating systems.
 - Red for record and yellow for solo do not look like the accent.

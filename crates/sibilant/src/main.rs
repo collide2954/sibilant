@@ -1,7 +1,7 @@
 mod app;
 
 use app::App;
-use sibilant_ui::fonts;
+use sibilant_ui::{fonts, icons};
 
 const WINDOW_SIZE: (f32, f32) = (1440.0, 900.0);
 
@@ -13,6 +13,7 @@ fn main() -> iced::Result {
         .window_size(WINDOW_SIZE);
     fonts::FILES
         .into_iter()
+        .chain([icons::FILE])
         .fold(application, iced::Application::font)
         .run()
 }
