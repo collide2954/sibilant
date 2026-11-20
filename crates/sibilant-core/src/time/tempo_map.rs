@@ -2,12 +2,12 @@ use super::{
     Clock, Duration, Musical, Position, SUPERCLOCKS_PER_SECOND, TICKS_PER_QUARTER_NOTE, Tempo,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TempoMap {
     segments: Vec<Segment>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct Segment {
     start: Position<Musical>,
     clock_start: Position<Clock>,
@@ -79,6 +79,12 @@ impl TempoMap {
     }
 }
 
+impl Default for TempoMap {
+    fn default() -> Self {
+        Self::new(Tempo::default())
+    }
+}
+
 fn to_clock_duration(duration: Duration<Musical>, tempo: Tempo) -> Duration<Clock> {
     let superclocks = to_f64(duration.ticks()) * superclocks_per_tick(tempo);
     Duration::from_superclocks(round(superclocks))
@@ -121,6 +127,12 @@ mod tests {
 
     fn tempo(bpm: f64) -> Tempo {
         Tempo::from_bpm(bpm).unwrap()
+    }
+
+    #[test]
+    fn the_default_map_has_the_default_tempo_everywhere() {
+        let map = TempoMap::default();
+        assert_eq!(map, TempoMap::new(Tempo::default()));
     }
 
     #[test]
