@@ -3,11 +3,13 @@ use std::sync::Arc;
 
 use super::timeline::Lane;
 use super::{Clip, EditError, Project, SceneId, TrackId};
+use crate::mix::Mix;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Track {
     pub(super) id: TrackId,
     pub(super) name: String,
+    pub(super) mix: Mix,
     pub(super) slots: BTreeMap<SceneId, Arc<Clip>>,
     pub(super) timeline: Lane,
 }
@@ -19,6 +21,10 @@ impl Track {
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub fn mix(&self) -> Mix {
+        self.mix
     }
 
     pub fn slot(&self, scene: SceneId) -> Option<&Clip> {
@@ -43,6 +49,7 @@ impl Project {
         project.tracks.push(Arc::new(Track {
             id,
             name: name.into(),
+            mix: Mix::default(),
             slots: BTreeMap::new(),
             timeline: Lane::new(),
         }));

@@ -2,6 +2,7 @@ mod clip;
 mod edit_error;
 mod id;
 mod launcher;
+mod mixer;
 mod scene;
 mod source;
 mod timeline;
