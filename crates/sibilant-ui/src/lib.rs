@@ -1,3 +1,4 @@
+pub mod browser;
 pub mod command;
 pub mod fonts;
 pub mod icons;

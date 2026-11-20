@@ -3,7 +3,7 @@ use iced::{Border, Element, Length};
 use sibilant_core::project::{Clip, Project, Track};
 
 use crate::command::Command;
-use crate::style::filled;
+use crate::style::{filled, quiet};
 use crate::theme::{Color, Palette};
 use crate::timeline::{RULER_HEIGHT, View, lane, ruler};
 
@@ -168,20 +168,6 @@ fn scene_row(project: &Project, palette: Palette) -> Element<'_, Command> {
     row![space().width(HEADER_WIDTH), row(names).spacing(DIVIDER)]
         .spacing(DIVIDER)
         .into()
-}
-
-fn quiet(palette: Palette, status: button::Status) -> button::Style {
-    let background = match status {
-        button::Status::Hovered | button::Status::Pressed => {
-            Some(iced::Color::from(palette.raised).into())
-        }
-        button::Status::Active | button::Status::Disabled => None,
-    };
-    button::Style {
-        background,
-        text_color: palette.text_muted.into(),
-        ..button::Style::default()
-    }
 }
 
 #[cfg(test)]
