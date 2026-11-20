@@ -1,4 +1,8 @@
+mod grid;
+
 use sibilant_core::time::{Duration, Musical, Position, TICKS_PER_QUARTER_NOTE};
+
+pub use grid::{BarLine, Grid};
 
 const DEFAULT_ZOOM: f64 = 32.0;
 const MIN_ZOOM: f64 = 2.0;
@@ -39,6 +43,14 @@ impl Viewport {
 
     pub fn position_at(&self, x: f32) -> Position<Musical> {
         self.start + Duration::from_ticks(round(self.ticks_of(f64::from(x))))
+    }
+
+    #[must_use]
+    pub fn with_zoom(self, pixels_per_quarter_note: f64) -> Self {
+        Self {
+            pixels_per_quarter_note: pixels_per_quarter_note.clamp(MIN_ZOOM, MAX_ZOOM),
+            ..self
+        }
     }
 
     #[must_use]
@@ -174,6 +186,13 @@ mod tests {
             let moved = (zoomed.position_at(100.0) - under_mouse).ticks().abs();
             assert!(moved <= 1, "{steps} steps moved {moved} ticks");
         }
+    }
+
+    #[test]
+    fn a_zoom_can_be_set_directly_within_the_limits() {
+        let view = Viewport::default();
+        assert!(is_close(view.with_zoom(8.0).pixels_per_quarter_note(), 8.0));
+        assert!(is_close(view.with_zoom(0.5).pixels_per_quarter_note(), 2.0));
     }
 
     #[test]
