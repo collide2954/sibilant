@@ -30,3 +30,8 @@ To change a decision, write a new record. Then change the status of the old reco
 | [0013](0013-fixed-resizable-zones.md) | Use fixed window zones that the user can resize |
 | [0014](0014-inline-clip-launcher.md) | Show the clip launcher inline in each track row |
 | [0015](0015-mouse-first-with-full-keyboard.md) | Make the mouse the main input and give full keyboard control |
+| [0016](0016-trunk-based-conventional-commits.md) | Push small commits to main with one-line Conventional Commits |
+| [0017](0017-test-driven-development.md) | Use test-driven development for all code |
+| [0018](0018-same-checks-everywhere.md) | Run the same checks on each computer and in CI |
+| [0019](0019-permissive-licenses-only.md) | Accept only dependencies with permissive licenses |
+| [0020](0020-ste-documentation-and-few-comments.md) | Write documentation in ASD-STE100 and keep comments to a minimum |
