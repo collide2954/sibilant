@@ -63,6 +63,12 @@ impl TimeSignatureMap {
         self.segment_at(position).time_signature
     }
 
+    pub fn changes(&self) -> impl ExactSizeIterator<Item = (i64, TimeSignature)> {
+        self.segments
+            .iter()
+            .map(|segment| (segment.bar, segment.time_signature))
+    }
+
     pub fn bar_start(&self, bar: i64) -> Position<Musical> {
         self.segment_of_bar(bar).bar_start(bar)
     }
@@ -231,6 +237,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn lists_each_time_signature_with_the_bar_where_it_starts() {
+        let map = TimeSignatureMap::new(time_signature(4, 4))
+            .with_time_signature(5, time_signature(7, 8))
+            .with_time_signature(3, time_signature(3, 4));
+        let changes: Vec<_> = map.changes().collect();
+        assert_eq!(
+            changes,
+            [
+                (1, time_signature(4, 4)),
+                (3, time_signature(3, 4)),
+                (5, time_signature(7, 8)),
+            ]
+        );
+    }
+
     fn bar_beat(bar: i64, beat: i64, ticks: i64) -> BarBeat {
         BarBeat {
             bar,
@@ -352,6 +374,17 @@ mod tests {
             prop_assert!(position < map.bar_start(bar_beat.bar + 1));
             prop_assert!((1..=i64::from(time_signature.numerator())).contains(&bar_beat.beat));
             prop_assert!((0..time_signature.beat_length().ticks()).contains(&bar_beat.offset.ticks()));
+        }
+
+        #[test]
+        fn a_map_made_again_from_its_changes_is_the_same(
+            (first, changes) in time_signature_changes(),
+        ) {
+            let map = time_signature_map(first, &changes);
+            let again = map.changes().fold(TimeSignatureMap::new(first), |again, (bar, signature)| {
+                again.with_time_signature(bar, signature)
+            });
+            prop_assert_eq!(again, map);
         }
 
         #[test]
