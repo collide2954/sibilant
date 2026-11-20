@@ -1,4 +1,4 @@
-use iced::keyboard::{Key, Modifiers};
+use iced::keyboard::{self, Key, Modifiers};
 use sibilant_core::project::TrackId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11,6 +11,18 @@ pub enum Command {
 }
 
 impl Command {
+    pub fn from_key_event(event: keyboard::Event) -> Option<Self> {
+        match event {
+            keyboard::Event::KeyPressed {
+                key,
+                modifiers,
+                repeat: false,
+                ..
+            } => Self::from_shortcut(&key, modifiers),
+            _ => None,
+        }
+    }
+
     pub fn from_shortcut(key: &Key, modifiers: Modifiers) -> Option<Self> {
         let Key::Character(character) = key else {
             return None;
@@ -31,7 +43,7 @@ impl Command {
 
 #[cfg(test)]
 mod tests {
-    use iced::keyboard::{Key, Modifiers};
+    use iced::keyboard::{self, Key, Modifiers, key};
 
     use crate::command::Command;
 
@@ -72,5 +84,30 @@ mod tests {
     fn keys_without_the_command_key_are_not_shortcuts() {
         assert_eq!(press("t", Modifiers::empty()), None);
         assert_eq!(press("z", Modifiers::SHIFT), None);
+    }
+
+    fn key_event(character: &str, repeat: bool) -> keyboard::Event {
+        keyboard::Event::KeyPressed {
+            key: Key::Character(character.into()),
+            modified_key: Key::Character(character.into()),
+            physical_key: key::Physical::Unidentified(key::NativeCode::Unidentified),
+            location: keyboard::Location::Standard,
+            modifiers: Modifiers::COMMAND,
+            text: None,
+            repeat,
+        }
+    }
+
+    #[test]
+    fn a_key_press_sends_the_command_of_its_shortcut() {
+        assert_eq!(
+            Command::from_key_event(key_event("t", false)),
+            Some(Command::AddTrack)
+        );
+    }
+
+    #[test]
+    fn a_key_that_repeats_while_held_sends_no_more_commands() {
+        assert_eq!(Command::from_key_event(key_event("t", true)), None);
     }
 }
