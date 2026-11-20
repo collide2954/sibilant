@@ -27,6 +27,13 @@ impl Project {
         self.scenes().find(|scene| scene.id == id)
     }
 
+    pub(super) fn check_scene(&self, id: SceneId) -> Result<(), EditError> {
+        match self.scene(id) {
+            Some(_) => Ok(()),
+            None => Err(EditError::UnknownScene(id)),
+        }
+    }
+
     pub fn add_scene(&self, id: SceneId, name: impl Into<String>) -> Result<Self, EditError> {
         if self.scene(id).is_some() {
             return Err(EditError::DuplicateScene(id));

@@ -1,11 +1,13 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use super::{EditError, Project, TrackId};
+use super::{Clip, EditError, Project, SceneId, TrackId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Track {
-    id: TrackId,
-    name: String,
+    pub(super) id: TrackId,
+    pub(super) name: String,
+    pub(super) slots: BTreeMap<SceneId, Arc<Clip>>,
 }
 
 impl Track {
@@ -15,6 +17,10 @@ impl Track {
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub fn slot(&self, scene: SceneId) -> Option<&Clip> {
+        self.slots.get(&scene).map(Arc::as_ref)
     }
 }
 
@@ -32,8 +38,11 @@ impl Project {
             return Err(EditError::DuplicateTrack(id));
         }
         let mut project = self.clone();
-        let name = name.into();
-        project.tracks.push(Arc::new(Track { id, name }));
+        project.tracks.push(Arc::new(Track {
+            id,
+            name: name.into(),
+            slots: BTreeMap::new(),
+        }));
         Ok(project)
     }
 
@@ -58,7 +67,11 @@ impl Project {
         self.edit_track(id, |track| track.name = name)
     }
 
-    fn edit_track(&self, id: TrackId, edit: impl FnOnce(&mut Track)) -> Result<Self, EditError> {
+    pub(super) fn edit_track(
+        &self,
+        id: TrackId,
+        edit: impl FnOnce(&mut Track),
+    ) -> Result<Self, EditError> {
         let index = self.track_index(id)?;
         let mut project = self.clone();
         edit(Arc::make_mut(&mut project.tracks[index]));

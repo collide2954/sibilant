@@ -1,5 +1,7 @@
+mod clip;
 mod edit_error;
 mod id;
+mod launcher;
 mod scene;
 mod source;
 mod track;
@@ -7,6 +9,7 @@ mod track;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+pub use clip::{Clip, Region};
 pub use edit_error::EditError;
 pub use id::{SceneId, SourceId, TrackId};
 pub use scene::Scene;
