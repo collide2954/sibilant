@@ -1,4 +1,4 @@
-use sibilant_core::time::TimeSignatureMap;
+use sibilant_core::time::{Musical, Position, TimeSignatureMap};
 
 use super::Viewport;
 
@@ -46,6 +46,23 @@ impl Viewport {
     }
 }
 
+impl Viewport {
+    pub fn snap(&self, x: f32, time_signatures: &TimeSignatureMap) -> Position<Musical> {
+        let position = self.position_at(x).max(Position::START);
+        let bar = time_signatures.to_bar_beat(position).bar;
+        let start = time_signatures.bar_start(bar);
+        let next = time_signatures.bar_start(bar + 1);
+        let beat = time_signatures.time_signature_at(start).beat_length();
+        let step = if self.width_of(beat) >= MIN_BEAT_SPACING {
+            beat
+        } else {
+            next - start
+        };
+        let steps = ((position - start).ticks() + step.ticks() / 2) / step.ticks();
+        (start + step * steps).min(next)
+    }
+}
+
 fn label_interval(bar_width: f32) -> i64 {
     let (mut interval, mut spacing) = (1, bar_width);
     while spacing < MIN_LABEL_SPACING && spacing > 0.0 {
@@ -57,7 +74,9 @@ fn label_interval(bar_width: f32) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use sibilant_core::time::{TimeSignature, TimeSignatureMap};
+    use sibilant_core::time::{
+        Musical, Position, TICKS_PER_QUARTER_NOTE, TimeSignature, TimeSignatureMap,
+    };
 
     use crate::timeline::{BarLine, Viewport};
 
@@ -105,6 +124,32 @@ mod tests {
         let every_fourth = Viewport::default().with_zoom(4.0).grid(&map, 200.0);
         assert_eq!(labeled_bars(&every_second.bars), [1, 3, 5, 7]);
         assert_eq!(labeled_bars(&every_fourth.bars), [1, 5, 9, 13]);
+    }
+
+    fn quarter_notes(quarter_notes: i64) -> Position<Musical> {
+        Position::from_quarter_notes(quarter_notes)
+    }
+
+    #[test]
+    fn a_position_snaps_to_the_nearest_beat_when_the_beat_lines_show() {
+        let view = Viewport::default();
+        assert_eq!(view.snap(40.0, &common_time()), quarter_notes(1));
+        assert_eq!(view.snap(50.0, &common_time()), quarter_notes(2));
+        assert_eq!(view.snap(120.0, &common_time()), quarter_notes(4));
+    }
+
+    #[test]
+    fn a_position_snaps_to_the_nearest_bar_when_the_beat_lines_do_not_show() {
+        let view = Viewport::default().with_zoom(2.0);
+        assert_eq!(view.snap(10.0, &common_time()), quarter_notes(4));
+        assert_eq!(view.snap(13.0, &common_time()), quarter_notes(8));
+    }
+
+    #[test]
+    fn the_snap_follows_the_beat_of_the_time_signature() {
+        let six_eight = TimeSignatureMap::new(TimeSignature::new(6, 8).unwrap());
+        let eighth = Position::from_ticks(TICKS_PER_QUARTER_NOTE / 2);
+        assert_eq!(Viewport::default().snap(20.0, &six_eight), eighth);
     }
 
     #[test]
