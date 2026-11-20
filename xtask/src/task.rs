@@ -4,10 +4,11 @@ use crate::step::Step;
 pub(crate) enum Task {
     PreCommit,
     PrePush,
+    InstallHooks,
 }
 
 impl Task {
-    const ALL: [Self; 2] = [Self::PreCommit, Self::PrePush];
+    const ALL: [Self; 3] = [Self::PreCommit, Self::PrePush, Self::InstallHooks];
 
     pub(crate) fn from_name(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|task| task.name() == name)
@@ -24,6 +25,7 @@ impl Task {
         match self {
             Self::PreCommit => &[Step::FORMAT, Step::LINT],
             Self::PrePush => &[Step::TEST],
+            Self::InstallHooks => &[Step::INSTALL_HOOKS],
         }
     }
 
@@ -31,6 +33,7 @@ impl Task {
         match self {
             Self::PreCommit => "pre-commit",
             Self::PrePush => "pre-push",
+            Self::InstallHooks => "install-hooks",
         }
     }
 }
@@ -47,6 +50,7 @@ mod tests {
     fn finds_each_task_by_name() {
         assert_eq!(Task::from_name("pre-commit"), Some(Task::PreCommit));
         assert_eq!(Task::from_name("pre-push"), Some(Task::PrePush));
+        assert_eq!(Task::from_name("install-hooks"), Some(Task::InstallHooks));
     }
 
     #[test]
@@ -56,7 +60,10 @@ mod tests {
 
     #[test]
     fn usage_lists_every_task() {
-        assert_eq!(Task::usage(), "usage: cargo xtask <pre-commit|pre-push>");
+        assert_eq!(
+            Task::usage(),
+            "usage: cargo xtask <pre-commit|pre-push|install-hooks>"
+        );
     }
 
     #[test]
@@ -73,5 +80,13 @@ mod tests {
     #[test]
     fn pre_push_runs_the_tests() {
         assert_eq!(commands(Task::PrePush), ["cargo test --workspace"]);
+    }
+
+    #[test]
+    fn install_hooks_points_git_at_the_hooks_folder() {
+        assert_eq!(
+            commands(Task::InstallHooks),
+            ["git config core.hooksPath .githooks"]
+        );
     }
 }

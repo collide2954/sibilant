@@ -19,6 +19,10 @@ impl Step {
         "warnings",
     ]);
     pub(crate) const TEST: Self = Self::cargo(&["test", "--workspace"]);
+    pub(crate) const INSTALL_HOOKS: Self = Self {
+        program: "git",
+        args: &["config", "core.hooksPath", ".githooks"],
+    };
 
     const fn cargo(args: &'static [&'static str]) -> Self {
         Self {
