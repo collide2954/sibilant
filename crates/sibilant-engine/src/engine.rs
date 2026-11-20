@@ -1,3 +1,4 @@
+use std::mem;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
@@ -8,6 +9,7 @@ use crate::arrangement::Arrangement;
 use crate::click::ClickVoice;
 
 const QUEUE_CAPACITY: usize = 256;
+const ARRANGEMENT_CAPACITY: usize = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
@@ -25,13 +27,17 @@ struct Shared {
 #[derive(Debug)]
 pub struct Controller {
     commands: Producer<Command>,
+    arrangements: Producer<Box<Arrangement>>,
+    released: Consumer<Box<Arrangement>>,
     shared: Arc<Shared>,
 }
 
 #[derive(Debug)]
 pub struct Engine {
-    arrangement: Arrangement,
+    arrangement: Box<Arrangement>,
     commands: Consumer<Command>,
+    arrangements: Consumer<Box<Arrangement>>,
+    released: Producer<Box<Arrangement>>,
     shared: Arc<Shared>,
     playing: bool,
     marker: Position<Musical>,
@@ -42,19 +48,25 @@ pub struct Engine {
 }
 
 pub fn new(arrangement: Arrangement) -> (Controller, Engine) {
-    let (producer, consumer) = RingBuffer::new(QUEUE_CAPACITY);
+    let (commands, command_queue) = RingBuffer::new(QUEUE_CAPACITY);
+    let (arrangements, arrangement_queue) = RingBuffer::new(ARRANGEMENT_CAPACITY);
+    let (released_queue, released) = RingBuffer::new(ARRANGEMENT_CAPACITY);
     let shared = Arc::new(Shared::default());
     let marker = Position::START;
     let start = arrangement.timing().frame_of(marker);
     shared.playhead.store(start, Ordering::Relaxed);
     let controller = Controller {
-        commands: producer,
+        commands,
+        arrangements,
+        released,
         shared: Arc::clone(&shared),
     };
     let click = ClickVoice::new(arrangement.timing().sample_rate());
     let engine = Engine {
-        arrangement,
-        commands: consumer,
+        arrangement: Box::new(arrangement),
+        commands: command_queue,
+        arrangements: arrangement_queue,
+        released: released_queue,
         shared,
         playing: false,
         marker,
@@ -78,10 +90,19 @@ impl Controller {
     pub fn playhead(&self) -> i64 {
         self.shared.playhead.load(Ordering::Relaxed)
     }
+
+    pub fn replace_arrangement(&mut self, arrangement: Arrangement) -> bool {
+        self.arrangements.push(Box::new(arrangement)).is_ok()
+    }
+
+    pub fn release_old_arrangements(&mut self) {
+        while self.released.pop().is_ok() {}
+    }
 }
 
 impl Engine {
     pub fn process(&mut self, output: &mut [f32], channels: usize) {
+        self.take_new_arrangements();
         while let Ok(command) = self.commands.pop() {
             self.apply(command);
         }
@@ -107,6 +128,16 @@ impl Engine {
         }
         self.shared.playing.store(self.playing, Ordering::Relaxed);
         self.shared.playhead.store(self.playhead, Ordering::Relaxed);
+    }
+
+    fn take_new_arrangements(&mut self) {
+        while self.released.slots() > 0 {
+            let Ok(new) = self.arrangements.pop() else {
+                break;
+            };
+            let old = mem::replace(&mut self.arrangement, new);
+            let _ = self.released.push(old);
+        }
     }
 
     fn apply(&mut self, command: Command) {
@@ -174,7 +205,7 @@ mod tests {
     use sibilant_core::time::{TempoMap, TimeSignatureMap};
 
     use crate::arrangement::{Arrangement, AudioBuffer, ClipPlayback, TrackPlayback};
-    use crate::engine::{self, Command, Controller, Engine};
+    use crate::engine::{self, ARRANGEMENT_CAPACITY, Command, Controller, Engine};
     use crate::timing::Timing;
 
     fn timing() -> Timing {
@@ -427,6 +458,62 @@ mod tests {
         let expected = run(&mut whole, 48_000);
         let actual: Vec<f32> = (0..480).flat_map(|_| run(&mut pieces, 100)).collect();
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn a_new_arrangement_plays_from_the_next_buffer() {
+        let (mut controller, mut engine) = engine();
+        controller.send(Command::TogglePlay);
+        let _ = run(&mut engine, 100);
+        let audio = vec![vec![0.5; 1_000]];
+        let arrangement = Arrangement::new(
+            timing(),
+            vec![track([1.0, 1.0], clip(0, 1_000, 0, 1, audio))],
+        );
+        assert!(controller.replace_arrangement(arrangement));
+        assert_eq!(left(&run(&mut engine, 100))[50], 0.5);
+    }
+
+    #[test]
+    fn the_engine_returns_the_old_arrangement_for_the_controller_to_release() {
+        let audio = Arc::new(AudioBuffer::new(vec![vec![0.5; 100]]));
+        let old = ClipPlayback {
+            audio: Arc::clone(&audio),
+            ..clip(0, 100, 0, 1, Vec::new())
+        };
+        let (mut controller, mut engine) = engine_with(vec![track([1.0, 1.0], old)]);
+        controller.replace_arrangement(Arrangement::new(timing(), Vec::new()));
+        let _ = run(&mut engine, 10);
+        assert_eq!(Arc::strong_count(&audio), 2);
+        controller.release_old_arrangements();
+        assert_eq!(Arc::strong_count(&audio), 1);
+    }
+
+    #[test]
+    fn a_new_arrangement_waits_until_the_controller_releases_the_old_ones() {
+        let (mut controller, mut engine) = engine();
+        controller.send(Command::TogglePlay);
+        for _ in 0..ARRANGEMENT_CAPACITY {
+            assert!(controller.replace_arrangement(Arrangement::new(timing(), Vec::new())));
+        }
+        let _ = run(&mut engine, 10);
+        let audio = vec![vec![0.5; 1_000]];
+        let with_clip = Arrangement::new(
+            timing(),
+            vec![track([1.0, 1.0], clip(0, 1_000, 0, 1, audio))],
+        );
+        assert!(controller.replace_arrangement(with_clip));
+        assert_eq!(peak(&run(&mut engine, 100)), 0.0);
+        controller.release_old_arrangements();
+        assert_eq!(left(&run(&mut engine, 100))[50], 0.5);
+    }
+
+    #[test]
+    fn replacing_the_arrangement_never_allocates_memory_in_the_engine() {
+        let (mut controller, mut engine) = busy();
+        let mut buffer = vec![0.0; 1_024];
+        controller.replace_arrangement(Arrangement::new(timing(), Vec::new()));
+        assert_no_alloc(|| engine.process(&mut buffer, 2));
     }
 
     #[test]
