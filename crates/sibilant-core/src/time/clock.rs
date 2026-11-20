@@ -28,6 +28,12 @@ impl Duration<Clock> {
         Self::new(superclocks)
     }
 
+    pub fn from_frames(frames: i64, sample_rate: u32) -> Self {
+        let superclocks = (i128::from(frames) * i128::from(SUPERCLOCKS_PER_SECOND))
+            .div_euclid(i128::from(sample_rate));
+        Self::from_superclocks(i64::try_from(superclocks).unwrap_or(i64::MAX))
+    }
+
     pub const fn superclocks(self) -> i64 {
         self.value()
     }
@@ -53,6 +59,26 @@ mod tests {
         ] {
             assert_eq!(SUPERCLOCKS_PER_SECOND % rate, 0, "sample rate {rate}");
         }
+    }
+
+    #[test]
+    fn frames_last_their_part_of_a_second_at_the_sample_rate() {
+        assert_eq!(
+            Duration::<Clock>::from_frames(96_000, 48_000),
+            Duration::from_seconds(2)
+        );
+        assert_eq!(
+            Duration::<Clock>::from_frames(22_050, 44_100).superclocks(),
+            141_120_000
+        );
+    }
+
+    #[test]
+    fn frames_at_an_uncommon_sample_rate_round_down_to_a_superclock() {
+        assert_eq!(
+            Duration::<Clock>::from_frames(1, 37_800).superclocks(),
+            7_466
+        );
     }
 
     #[test]
