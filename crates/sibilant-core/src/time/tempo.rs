@@ -21,6 +21,12 @@ impl Tempo {
     }
 }
 
+impl Default for Tempo {
+    fn default() -> Self {
+        Self(120.0)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TempoOutOfRange(f64);
 
@@ -61,6 +67,11 @@ mod tests {
         for bpm in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
             assert!(Tempo::from_bpm(bpm).is_err(), "{bpm} BPM");
         }
+    }
+
+    #[test]
+    fn the_default_tempo_is_120_bpm() {
+        assert_eq!(Tempo::default(), Tempo::from_bpm(120.0).unwrap());
     }
 
     #[test]

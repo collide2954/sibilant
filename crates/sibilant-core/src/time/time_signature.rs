@@ -47,6 +47,15 @@ impl TimeSignature {
     }
 }
 
+impl Default for TimeSignature {
+    fn default() -> Self {
+        Self {
+            numerator: 4,
+            denominator: 4,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InvalidTimeSignature {
     numerator: u8,
@@ -141,6 +150,11 @@ mod tests {
                 "4/{denominator}"
             );
         }
+    }
+
+    #[test]
+    fn the_default_time_signature_is_4_4() {
+        assert_eq!(TimeSignature::default(), time_signature(4, 4));
     }
 
     #[test]
