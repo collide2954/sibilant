@@ -2,6 +2,7 @@ use super::Color;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Palette {
+    pub name: &'static str,
     pub background: Color,
     pub surface: Color,
     pub raised: Color,
@@ -16,6 +17,7 @@ pub struct Palette {
 
 impl Palette {
     pub const GRAPHITE: Self = Self {
+        name: "Graphite",
         background: Color::from_hex(0x17_18_1B),
         surface: Color::from_hex(0x1F_20_24),
         raised: Color::from_hex(0x2A_2B_30),
@@ -27,6 +29,22 @@ impl Palette {
         record: Color::from_hex(0xE5_48_4D),
         solo: Color::from_hex(0xF5_D9_0A),
     };
+}
+
+impl From<Palette> for iced::Theme {
+    fn from(palette: Palette) -> Self {
+        Self::custom(
+            palette.name,
+            iced::theme::Palette {
+                background: palette.background.into(),
+                text: palette.text.into(),
+                primary: palette.accent.into(),
+                success: palette.accent.into(),
+                warning: palette.solo.into(),
+                danger: palette.record.into(),
+            },
+        )
+    }
 }
 
 #[cfg(test)]
@@ -71,6 +89,16 @@ mod tests {
                 assert!(contrast >= 3.0, "{name} on {surface_name}: {contrast:.2}");
             }
         }
+    }
+
+    #[test]
+    fn the_iced_theme_takes_its_colors_from_the_palette() {
+        let iced = iced::Theme::from(PALETTE).palette();
+        assert_eq!(iced.background, iced::Color::from(PALETTE.background));
+        assert_eq!(iced.text, iced::Color::from(PALETTE.text));
+        assert_eq!(iced.primary, iced::Color::from(PALETTE.accent));
+        assert_eq!(iced.warning, iced::Color::from(PALETTE.solo));
+        assert_eq!(iced.danger, iced::Color::from(PALETTE.record));
     }
 
     #[test]

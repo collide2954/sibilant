@@ -11,6 +11,11 @@ allow = [
     "Unicode-3.0",
     "Zlib",
 ]
+exceptions = [
+    { crate = "clipboard-win", allow = ["BSL-1.0"] },
+    { crate = "error-code", allow = ["BSL-1.0"] },
+    { crate = "hexf-parse", allow = ["CC0-1.0"] },
+]
 unused-allowed-license = "allow"
 
 [bans]

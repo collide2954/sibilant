@@ -11,6 +11,8 @@ repository = "https://github.com/collide2954/sibilant"
 publish = false
 
 [workspace.dependencies]
+iced = "0.14.0"
+iced_test = "0.14.0"
 proptest = { version = "1.12.0", default-features = false, features = ["std"] }
 
 [workspace.lints.rust]

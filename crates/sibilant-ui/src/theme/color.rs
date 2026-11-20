@@ -33,6 +33,12 @@ impl Color {
     }
 }
 
+impl From<Color> for iced::Color {
+    fn from(color: Color) -> Self {
+        Self::from_rgb8(color.red, color.green, color.blue)
+    }
+}
+
 fn linear(channel: u8) -> f64 {
     let value = f64::from(channel) / 255.0;
     if value <= 0.040_45 {
@@ -74,6 +80,14 @@ mod tests {
             violet.contrast_ratio(BLACK),
             BLACK.contrast_ratio(violet)
         ));
+    }
+
+    #[test]
+    fn converts_to_an_iced_color() {
+        assert_eq!(
+            iced::Color::from(Color::from_hex(0x8B_7C_F6)),
+            iced::Color::from_rgb8(0x8B, 0x7C, 0xF6)
+        );
     }
 
     #[test]
