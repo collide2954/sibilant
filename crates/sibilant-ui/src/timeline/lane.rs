@@ -1,6 +1,97 @@
+use iced::widget::canvas::{self, Canvas, Frame, Geometry};
+use iced::{Element, Length, Point, Rectangle, Renderer, Size, Theme, mouse};
 use sibilant_core::project::{Project, Track};
 
 use super::Viewport;
+use crate::theme::Palette;
+
+const CLIP_INSET: f32 = 2.0;
+const CLIP_GAP: f32 = 1.0;
+const NAME_INSET: f32 = 4.0;
+const NAME_SIZE: f32 = 11.0;
+
+struct Lane<'a> {
+    viewport: Viewport,
+    project: &'a Project,
+    track: &'a Track,
+    palette: Palette,
+}
+
+impl<Message> canvas::Program<Message> for Lane<'_> {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &(),
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<Geometry> {
+        let mut frame = Frame::new(renderer, bounds.size());
+        let palette = self.palette;
+        let height = bounds.height;
+        frame.fill_rectangle(
+            Point::ORIGIN,
+            bounds.size(),
+            iced::Color::from(palette.background),
+        );
+        let grid = self
+            .viewport
+            .grid(self.project.time_signature_map(), bounds.width);
+        for x in grid.beats {
+            let line = Size::new(1.0, height);
+            frame.fill_rectangle(Point::new(x, 0.0), line, iced::Color::from(palette.surface));
+        }
+        for bar in grid.bars {
+            let line = Size::new(1.0, height);
+            frame.fill_rectangle(
+                Point::new(bar.x, 0.0),
+                line,
+                iced::Color::from(palette.border),
+            );
+        }
+        let color = palette.track_color(self.track.color());
+        for clip in self
+            .viewport
+            .clip_boxes(self.project, self.track, bounds.width)
+        {
+            let area = Rectangle::new(
+                Point::new(clip.x, CLIP_INSET),
+                Size::new((clip.width - CLIP_GAP).max(1.0), height - 2.0 * CLIP_INSET),
+            );
+            frame.fill_rectangle(area.position(), area.size(), iced::Color::from(color));
+            frame.with_clip(area, |frame| {
+                frame.fill_text(canvas::Text {
+                    content: clip.name.to_owned(),
+                    position: Point::new(area.x + NAME_INSET, area.y + NAME_INSET),
+                    color: palette.on_track_color.into(),
+                    size: NAME_SIZE.into(),
+                    ..canvas::Text::default()
+                });
+            });
+        }
+        vec![frame.into_geometry()]
+    }
+}
+
+pub fn lane<'a, Message: 'a>(
+    viewport: Viewport,
+    project: &'a Project,
+    track: &'a Track,
+    palette: Palette,
+) -> Element<'a, Message> {
+    let lane = Lane {
+        viewport,
+        project,
+        track,
+        palette,
+    };
+    Canvas::new(lane)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ClipBox<'a> {

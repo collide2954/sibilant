@@ -1,10 +1,12 @@
 mod grid;
 mod lane;
+mod ruler;
 
 use sibilant_core::time::{Duration, Musical, Position, TICKS_PER_QUARTER_NOTE};
 
 pub use grid::{BarLine, Grid};
-pub use lane::ClipBox;
+pub use lane::{ClipBox, lane};
+pub use ruler::{HEIGHT as RULER_HEIGHT, ruler};
 
 const DEFAULT_ZOOM: f64 = 32.0;
 const MIN_ZOOM: f64 = 2.0;

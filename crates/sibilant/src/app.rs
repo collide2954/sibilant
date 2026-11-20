@@ -4,6 +4,7 @@ use sibilant_core::mix::Mix;
 use sibilant_core::project::{EditError, Ids, Project, TrackId};
 use sibilant_ui::command::Command;
 use sibilant_ui::theme::Palette;
+use sibilant_ui::timeline::Viewport;
 use sibilant_ui::{shell, track_area};
 
 #[derive(Debug)]
@@ -11,6 +12,7 @@ pub(crate) struct App {
     palette: Palette,
     history: History<Project>,
     ids: Ids,
+    viewport: Viewport,
 }
 
 impl Default for App {
@@ -21,6 +23,7 @@ impl Default for App {
             palette: Palette::default(),
             history: History::new(project),
             ids,
+            viewport: Viewport::default(),
         }
     }
 }
@@ -48,7 +51,7 @@ impl App {
     }
 
     pub(crate) fn view(&self) -> Element<'_, Command> {
-        let tracks = track_area::view(self.history.present(), self.palette);
+        let tracks = track_area::view(self.history.present(), self.viewport, self.palette);
         shell::view(self.palette, tracks)
     }
 

@@ -5,6 +5,7 @@ use sibilant_core::project::{Clip, Project, Track};
 use crate::command::Command;
 use crate::style::filled;
 use crate::theme::{Color, Palette};
+use crate::timeline::{self, RULER_HEIGHT, Viewport};
 
 const ROW_HEIGHT: f32 = 64.0;
 const HEADER_WIDTH: f32 = 200.0;
@@ -18,11 +19,11 @@ const TOGGLE_SIZE: f32 = 20.0;
 const TOGGLE_SPACING: f32 = 4.0;
 const RADIUS: f32 = 4.0;
 
-pub fn view(project: &Project, palette: Palette) -> Element<'_, Command> {
+pub fn view(project: &Project, viewport: Viewport, palette: Palette) -> Element<'_, Command> {
     let rows = column(
         project
             .tracks()
-            .map(|track| track_row(project, track, palette)),
+            .map(|track| track_row(project, track, viewport, palette)),
     )
     .spacing(DIVIDER);
     let add_track = button(text("Add track").size(TEXT_SIZE))
@@ -31,10 +32,21 @@ pub fn view(project: &Project, palette: Palette) -> Element<'_, Command> {
         .padding(PADDING)
         .style(move |_, status| quiet(palette, status));
     let content = column![rows, scene_row(project, palette), add_track].spacing(DIVIDER);
-    scrollable(content).into()
+    let ruler = timeline::ruler(viewport, project.time_signature_map(), palette);
+    let ruler_row = row![space().width(HEADER_WIDTH), slot_spacers(project), ruler]
+        .spacing(DIVIDER)
+        .height(RULER_HEIGHT);
+    column![ruler_row, scrollable(content)]
+        .spacing(DIVIDER)
+        .into()
 }
 
-fn track_row<'a>(project: &'a Project, track: &'a Track, palette: Palette) -> Element<'a, Command> {
+fn track_row<'a>(
+    project: &'a Project,
+    track: &'a Track,
+    viewport: Viewport,
+    palette: Palette,
+) -> Element<'a, Command> {
     let color = palette.track_color(track.color());
     let slots = project
         .scenes()
@@ -42,11 +54,17 @@ fn track_row<'a>(project: &'a Project, track: &'a Track, palette: Palette) -> El
     row![
         header(track, palette),
         row(slots).spacing(DIVIDER),
-        lane(palette)
+        timeline::lane(viewport, project, track, palette)
     ]
     .spacing(DIVIDER)
     .height(ROW_HEIGHT)
     .into()
+}
+
+fn slot_spacers(project: &Project) -> Element<'_, Command> {
+    row(project.scenes().map(|_| space().width(SLOT_WIDTH).into()))
+        .spacing(DIVIDER)
+        .into()
 }
 
 fn header(track: &Track, palette: Palette) -> Element<'_, Command> {
@@ -132,14 +150,6 @@ fn slot(clip: Option<&Clip>, color: Color, palette: Palette) -> Element<'_, Comm
         .into()
 }
 
-fn lane(palette: Palette) -> Element<'static, Command> {
-    container(space())
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .style(move |_| filled(palette.background))
-        .into()
-}
-
 fn scene_row(project: &Project, palette: Palette) -> Element<'_, Command> {
     let names = project.scenes().map(|scene| {
         container(
@@ -178,6 +188,7 @@ mod tests {
 
     use crate::command::Command;
     use crate::theme::Palette;
+    use crate::timeline::{RULER_HEIGHT, Viewport};
     use crate::track_area;
 
     fn new_project() -> Project {
@@ -185,9 +196,24 @@ mod tests {
     }
 
     #[test]
+    fn the_tracks_start_below_the_ruler() {
+        let project = new_project();
+        let mut ui = simulator(track_area::view(
+            &project,
+            Viewport::default(),
+            Palette::GRAPHITE,
+        ));
+        assert!(ui.find("Audio 1").unwrap().bounds().y >= RULER_HEIGHT);
+    }
+
+    #[test]
     fn shows_a_row_for_each_track_in_order() {
         let project = new_project();
-        let mut ui = simulator(track_area::view(&project, Palette::GRAPHITE));
+        let mut ui = simulator(track_area::view(
+            &project,
+            Viewport::default(),
+            Palette::GRAPHITE,
+        ));
         let first = ui.find("Audio 1").unwrap().bounds();
         let second = ui.find("Audio 2").unwrap().bounds();
         assert!(first.y < second.y);
@@ -196,7 +222,11 @@ mod tests {
     #[test]
     fn shows_the_scenes_below_the_tracks() {
         let project = new_project();
-        let mut ui = simulator(track_area::view(&project, Palette::GRAPHITE));
+        let mut ui = simulator(track_area::view(
+            &project,
+            Viewport::default(),
+            Palette::GRAPHITE,
+        ));
         let track = ui.find("Audio 2").unwrap().bounds();
         let scene = ui.find("Scene 1").unwrap().bounds();
         assert!(track.y < scene.y);
@@ -205,7 +235,11 @@ mod tests {
     #[test]
     fn the_add_track_button_sends_its_command() {
         let project = new_project();
-        let mut ui = simulator(track_area::view(&project, Palette::GRAPHITE));
+        let mut ui = simulator(track_area::view(
+            &project,
+            Viewport::default(),
+            Palette::GRAPHITE,
+        ));
         ui.click("Add track").unwrap();
         let messages: Vec<_> = ui.into_messages().collect();
         assert_eq!(messages, [Command::AddTrack]);
@@ -215,7 +249,11 @@ mod tests {
     fn the_mute_and_solo_buttons_send_their_commands_for_their_track() {
         let project = new_project();
         let first = project.tracks().next().unwrap().id();
-        let mut ui = simulator(track_area::view(&project, Palette::GRAPHITE));
+        let mut ui = simulator(track_area::view(
+            &project,
+            Viewport::default(),
+            Palette::GRAPHITE,
+        ));
         ui.click("M").unwrap();
         ui.click("S").unwrap();
         let messages: Vec<_> = ui.into_messages().collect();
@@ -242,7 +280,11 @@ mod tests {
                 project.put_clip_in_slot(track, scene, Clip::new("Kick", source, region))
             })
             .unwrap();
-        let mut ui = simulator(track_area::view(&project, Palette::GRAPHITE));
+        let mut ui = simulator(track_area::view(
+            &project,
+            Viewport::default(),
+            Palette::GRAPHITE,
+        ));
         assert!(ui.find("Kick").is_ok());
     }
 }
