@@ -13,6 +13,7 @@ The arranger, the snap grid, and the clip launcher need bars and beats. Record 0
 - The upper number is 1 to 99. The lower number is 1, 2, 4, 8, 16, 32, or 64.
 - A beat is the note value of the lower number. 6/8 has six beats, and each beat is an 8th note.
 - The quarter note stays the unit of ticks and tempo. The code calls this unit a quarter note, not a beat. This replaces the word "beat" in record 0021.
+- The tempo keeps the usual unit BPM. It gives the number of quarter notes in each minute.
 - A time signature change always starts a new bar. Each change belongs to a bar number. No bar is shorter than its time signature.
 - Bar 1 starts at the start of the project. Before bar 1, the first time signature continues. The bars before bar 1 have the numbers 0, -1, -2, and lower.
 - Bar numbers and beat numbers start at 1. In a beat, the offset counts ticks from 0.

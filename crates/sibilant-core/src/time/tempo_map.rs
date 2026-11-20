@@ -1,4 +1,6 @@
-use super::{Clock, Duration, Musical, Position, SUPERCLOCKS_PER_SECOND, TICKS_PER_BEAT, Tempo};
+use super::{
+    Clock, Duration, Musical, Position, SUPERCLOCKS_PER_SECOND, TICKS_PER_QUARTER_NOTE, Tempo,
+};
 
 #[derive(Debug, Clone)]
 pub struct TempoMap {
@@ -88,7 +90,7 @@ fn to_musical_duration(duration: Duration<Clock>, tempo: Tempo) -> Duration<Musi
 }
 
 fn superclocks_per_tick(tempo: Tempo) -> f64 {
-    60.0 * to_f64(SUPERCLOCKS_PER_SECOND) / (tempo.bpm() * to_f64(TICKS_PER_BEAT))
+    60.0 * to_f64(SUPERCLOCKS_PER_SECOND) / (tempo.bpm() * to_f64(TICKS_PER_QUARTER_NOTE))
 }
 
 #[expect(
@@ -122,19 +124,16 @@ mod tests {
     }
 
     #[test]
-    fn at_60_bpm_a_beat_lasts_one_second() {
+    fn at_60_bpm_a_quarter_note_lasts_one_second() {
         let map = TempoMap::new(tempo(60.0));
-        assert_eq!(
-            map.to_clock(Position::from_beats(1)),
-            Position::from_seconds(1)
-        );
+        assert_eq!(map.to_clock(quarter_notes(1)), Position::from_seconds(1));
     }
 
     #[test]
-    fn at_120_bpm_a_beat_lasts_half_a_second() {
+    fn at_120_bpm_a_quarter_note_lasts_half_a_second() {
         let map = TempoMap::new(tempo(120.0));
         assert_eq!(
-            map.to_clock(Position::from_beats(1)),
+            map.to_clock(quarter_notes(1)),
             Position::from_superclocks(SUPERCLOCKS_PER_SECOND / 2)
         );
     }
@@ -142,10 +141,7 @@ mod tests {
     #[test]
     fn converts_clock_time_back_to_musical_time() {
         let map = TempoMap::new(tempo(120.0));
-        assert_eq!(
-            map.to_musical(Position::from_seconds(2)),
-            Position::from_beats(4)
-        );
+        assert_eq!(map.to_musical(Position::from_seconds(2)), quarter_notes(4));
     }
 
     #[test]
@@ -163,49 +159,49 @@ mod tests {
 
     #[test]
     fn a_change_sets_the_tempo_from_its_position() {
-        let map = TempoMap::new(tempo(120.0)).with_tempo(beats(4), tempo(60.0));
-        assert_eq!(map.tempo_at(beats(3)), tempo(120.0));
-        assert_eq!(map.tempo_at(beats(4)), tempo(60.0));
+        let map = TempoMap::new(tempo(120.0)).with_tempo(quarter_notes(4), tempo(60.0));
+        assert_eq!(map.tempo_at(quarter_notes(3)), tempo(120.0));
+        assert_eq!(map.tempo_at(quarter_notes(4)), tempo(60.0));
     }
 
     #[test]
     fn musical_time_after_a_change_advances_at_the_new_tempo() {
-        let map = TempoMap::new(tempo(120.0)).with_tempo(beats(4), tempo(60.0));
-        assert_eq!(map.to_clock(beats(4)), Position::from_seconds(2));
-        assert_eq!(map.to_clock(beats(6)), Position::from_seconds(4));
+        let map = TempoMap::new(tempo(120.0)).with_tempo(quarter_notes(4), tempo(60.0));
+        assert_eq!(map.to_clock(quarter_notes(4)), Position::from_seconds(2));
+        assert_eq!(map.to_clock(quarter_notes(6)), Position::from_seconds(4));
     }
 
     #[test]
     fn clock_time_after_a_change_converts_back_at_the_new_tempo() {
-        let map = TempoMap::new(tempo(120.0)).with_tempo(beats(4), tempo(60.0));
-        assert_eq!(map.to_musical(Position::from_seconds(4)), beats(6));
+        let map = TempoMap::new(tempo(120.0)).with_tempo(quarter_notes(4), tempo(60.0));
+        assert_eq!(map.to_musical(Position::from_seconds(4)), quarter_notes(6));
     }
 
     #[test]
     fn changes_apply_in_position_order() {
         let map = TempoMap::new(tempo(120.0))
-            .with_tempo(beats(8), tempo(240.0))
-            .with_tempo(beats(4), tempo(60.0));
-        assert_eq!(map.to_clock(beats(12)), Position::from_seconds(7));
+            .with_tempo(quarter_notes(8), tempo(240.0))
+            .with_tempo(quarter_notes(4), tempo(60.0));
+        assert_eq!(map.to_clock(quarter_notes(12)), Position::from_seconds(7));
     }
 
     #[test]
     fn a_change_at_the_same_position_replaces_the_old_tempo() {
         let map = TempoMap::new(tempo(120.0))
-            .with_tempo(beats(4), tempo(60.0))
-            .with_tempo(beats(4), tempo(240.0));
-        assert_eq!(map.tempo_at(beats(4)), tempo(240.0));
+            .with_tempo(quarter_notes(4), tempo(60.0))
+            .with_tempo(quarter_notes(4), tempo(240.0));
+        assert_eq!(map.tempo_at(quarter_notes(4)), tempo(240.0));
     }
 
     #[test]
     fn a_change_at_or_before_the_start_replaces_the_first_tempo() {
-        let map = TempoMap::new(tempo(120.0)).with_tempo(beats(-2), tempo(60.0));
-        assert_eq!(map.tempo_at(beats(-4)), tempo(60.0));
-        assert_eq!(map.to_clock(beats(1)), Position::from_seconds(1));
+        let map = TempoMap::new(tempo(120.0)).with_tempo(quarter_notes(-2), tempo(60.0));
+        assert_eq!(map.tempo_at(quarter_notes(-4)), tempo(60.0));
+        assert_eq!(map.to_clock(quarter_notes(1)), Position::from_seconds(1));
     }
 
-    fn beats(beats: i64) -> Position<Musical> {
-        Position::from_beats(beats)
+    fn quarter_notes(quarter_notes: i64) -> Position<Musical> {
+        Position::from_quarter_notes(quarter_notes)
     }
 
     fn tempo_changes() -> impl Strategy<Value = (f64, Vec<(i64, f64)>)> {

@@ -54,19 +54,19 @@ mod tests {
 
     #[test]
     fn adding_a_duration_moves_a_position_forward() {
-        let position = Position::<Musical>::from_beats(2) + Duration::from_beats(3);
-        assert_eq!(position, Position::from_beats(5));
+        let position = Position::<Musical>::from_ticks(2) + Duration::from_ticks(3);
+        assert_eq!(position, Position::from_ticks(5));
     }
 
     #[test]
     fn subtracting_a_duration_moves_a_position_back() {
-        let position = Position::<Musical>::from_beats(5) - Duration::from_beats(3);
-        assert_eq!(position, Position::from_beats(2));
+        let position = Position::<Musical>::from_ticks(5) - Duration::from_ticks(3);
+        assert_eq!(position, Position::from_ticks(2));
     }
 
     #[test]
     fn subtracting_two_positions_gives_the_duration_between_them() {
-        let duration = Position::<Musical>::from_beats(5) - Position::from_beats(2);
-        assert_eq!(duration, Duration::from_beats(3));
+        let duration = Position::<Musical>::from_ticks(5) - Position::from_ticks(2);
+        assert_eq!(duration, Duration::from_ticks(3));
     }
 }
