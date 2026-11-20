@@ -7,5 +7,9 @@ name = "sibilant"
 version = "0.0.0"
 
 [[package]]
+name = "sibilant-core"
+version = "0.0.0"
+
+[[package]]
 name = "xtask"
 version = "0.0.0"
