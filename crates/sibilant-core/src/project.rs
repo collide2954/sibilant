@@ -27,7 +27,8 @@ impl Project {
             return Err(EditError::DuplicateTrack(id));
         }
         let mut project = self.clone();
-        project.tracks.push(Arc::new(Track::new(id, name.into())));
+        let name = name.into();
+        project.tracks.push(Arc::new(Track { id, name }));
         Ok(project)
     }
 
@@ -35,6 +36,18 @@ impl Project {
         let index = self.track_index(id)?;
         let mut project = self.clone();
         project.tracks.remove(index);
+        Ok(project)
+    }
+
+    pub fn rename_track(&self, id: TrackId, name: impl Into<String>) -> Result<Self, EditError> {
+        let name = name.into();
+        self.edit_track(id, |track| track.name = name)
+    }
+
+    fn edit_track(&self, id: TrackId, edit: impl FnOnce(&mut Track)) -> Result<Self, EditError> {
+        let index = self.track_index(id)?;
+        let mut project = self.clone();
+        edit(Arc::make_mut(&mut project.tracks[index]));
         Ok(project)
     }
 
@@ -48,6 +61,8 @@ impl Project {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use crate::project::{EditError, Project, Track, TrackId};
 
     fn track_names(project: &Project) -> Vec<&str> {
@@ -112,6 +127,31 @@ mod tests {
             project.remove_track(TrackId::new(9)),
             Err(EditError::UnknownTrack(TrackId::new(9)))
         );
+    }
+
+    #[test]
+    fn renaming_a_track_changes_only_its_name() {
+        let project = with_tracks(&["Drums", "Bass"]);
+        let project = project.rename_track(TrackId::new(2), "Sub").unwrap();
+        assert_eq!(track_names(&project), ["Drums", "Sub"]);
+        assert!(project.track(TrackId::new(2)).is_some());
+    }
+
+    #[test]
+    fn renaming_an_unknown_track_is_an_error() {
+        let project = with_tracks(&["Drums"]);
+        assert_eq!(
+            project.rename_track(TrackId::new(9), "Bass"),
+            Err(EditError::UnknownTrack(TrackId::new(9)))
+        );
+    }
+
+    #[test]
+    fn an_edit_shares_the_tracks_that_it_does_not_change() {
+        let old = with_tracks(&["Drums", "Bass"]);
+        let new = old.rename_track(TrackId::new(2), "Sub").unwrap();
+        assert!(Arc::ptr_eq(&old.tracks[0], &new.tracks[0]));
+        assert!(!Arc::ptr_eq(&old.tracks[1], &new.tracks[1]));
     }
 
     #[test]
