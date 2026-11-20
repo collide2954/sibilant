@@ -85,10 +85,15 @@ impl App {
     pub(crate) fn with_audio() -> (Self, Task<Message>) {
         let (mut app, task) = Self::boot();
         match Audio::start(app.history.present()) {
-            Ok(audio) => app.audio = Some(audio),
+            Ok(audio) => app.attach_audio(audio),
             Err(error) => eprintln!("audio output is not available: {error}"),
         }
         (app, task)
+    }
+
+    fn attach_audio(&mut self, audio: Audio) {
+        self.audio = Some(audio);
+        self.send(engine::Command::SetPreviewGain(self.browser.preview_gain()));
     }
 
     fn boot() -> (Self, Task<Message>) {
@@ -101,7 +106,7 @@ impl App {
             Message::Command(command) => return self.run(command),
             Message::Browser(event) => return self.browse(&event),
             Message::Places(places) => {
-                self.browser = Browser::new(places);
+                self.browser.set_places(places);
                 return self.browse(&browser::Event::Choose(0));
             }
             Message::Listed(folder, result) => self.browser.listed(folder, result),
@@ -201,6 +206,10 @@ impl App {
             Some(Request::Preview(file)) => self.start_preview(file),
             Some(Request::StopPreview) => {
                 self.stop_preview();
+                Task::none()
+            }
+            Some(Request::Volume(gain)) => {
+                self.send(engine::Command::SetPreviewGain(gain));
                 Task::none()
             }
             None => Task::none(),
@@ -572,6 +581,23 @@ mod tests {
     }
 
     #[test]
+    fn a_preview_plays_at_minus_6_db_when_the_audio_starts() {
+        let (mut app, mut engine) = with_simulated_audio();
+        hear_kick(&mut app, 48_000);
+        let level = loudest(&render(&mut engine, 480));
+        assert!((level - 0.5 * 0.501_19).abs() < 1e-3, "level {level}");
+    }
+
+    #[test]
+    fn a_new_preview_volume_reaches_the_engine() {
+        let (mut app, mut engine) = with_simulated_audio();
+        let _ = app.update(Message::Browser(browser::Event::Volume(-12.0)));
+        hear_kick(&mut app, 48_000);
+        let level = loudest(&render(&mut engine, 480));
+        assert!((level - 0.5 * 0.251_19).abs() < 1e-3, "level {level}");
+    }
+
+    #[test]
     fn a_preview_that_cannot_be_loaded_tells_why() {
         let (mut app, _engine) = with_simulated_audio();
         let _ = click(&mut app, kick());
@@ -777,7 +803,7 @@ mod tests {
     fn with_simulated_audio() -> (App, Engine) {
         let mut app = App::default();
         let (audio, engine) = Audio::without_device(app.history.present(), 48_000);
-        app.audio = Some(audio);
+        app.attach_audio(audio);
         (app, engine)
     }
 

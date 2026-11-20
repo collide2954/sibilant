@@ -1,10 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::RangeInclusive;
 use std::path::{Path, PathBuf};
 
-use iced::widget::{button, column, container, mouse_area, row, scrollable, space, text};
-use iced::{Element, Length, mouse};
+use iced::widget::{button, column, container, mouse_area, row, scrollable, slider, space, text};
+use iced::{Alignment, Element, Length, mouse};
 use sibilant_media::{Entry, EntryKind, Place};
 
+use crate::fonts;
 use crate::icons::{self, Icon};
 use crate::style::quiet;
 use crate::theme::{Color, Palette};
@@ -14,22 +16,63 @@ const ICON_SIZE: f32 = 14.0;
 const INDENT: f32 = 16.0;
 const SPACING: f32 = 4.0;
 const ROW_PADDING: [f32; 2] = [2.0, 4.0];
+const VOLUME_RANGE: RangeInclusive<f32> = -60.0..=0.0;
+const VOLUME_STEP: f32 = 0.5;
+const START_VOLUME: f32 = -6.0;
+const VOLUME_LABEL_WIDTH: f32 = 64.0;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Volume(f32);
+
+impl Default for Volume {
+    fn default() -> Self {
+        Self(START_VOLUME)
+    }
+}
+
+impl Volume {
+    fn new(db: f32) -> Self {
+        Self(db.clamp(*VOLUME_RANGE.start(), *VOLUME_RANGE.end()))
+    }
+
+    fn is_silent(self) -> bool {
+        self.0 <= *VOLUME_RANGE.start()
+    }
+
+    fn gain(self) -> f32 {
+        if self.is_silent() {
+            0.0
+        } else {
+            10_f32.powf(self.0 / 20.0)
+        }
+    }
+
+    fn label(self) -> String {
+        if self.is_silent() {
+            "Off".into()
+        } else {
+            format!("{:.1} dB", self.0).replace('-', "\u{2212}")
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Event {
     Choose(usize),
     Toggle(PathBuf),
     Press(PathBuf),
     Leave(PathBuf),
     Release(PathBuf),
+    Volume(f32),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Request {
     List(PathBuf),
     Drag(PathBuf),
     Preview(PathBuf),
     StopPreview,
+    Volume(f32),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,7 +82,7 @@ enum Listing {
     Failed(String),
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Browser {
     places: Vec<Place>,
     place: Option<usize>,
@@ -49,14 +92,22 @@ pub struct Browser {
     pressed: Option<PathBuf>,
     dragged: bool,
     previewing: Option<PathBuf>,
+    volume: Volume,
 }
 
 impl Browser {
     pub fn new(places: Vec<Place>) -> Self {
-        Self {
-            places,
-            ..Self::default()
-        }
+        let mut browser = Self::default();
+        browser.set_places(places);
+        browser
+    }
+
+    pub fn set_places(&mut self, places: Vec<Place>) {
+        self.places = places;
+    }
+
+    pub fn preview_gain(&self) -> f32 {
+        self.volume.gain()
     }
 
     pub fn update(&mut self, event: &Event) -> Option<Request> {
@@ -94,6 +145,10 @@ impl Browser {
                         Request::Preview(file.clone())
                     }
                 })
+            }
+            Event::Volume(db) => {
+                self.volume = Volume::new(*db);
+                Some(Request::Volume(self.volume.gain()))
             }
         }
     }
@@ -149,13 +204,29 @@ pub fn view(browser: &Browser, palette: Palette) -> Element<'_, Event> {
     }
     let mut content = column![
         places,
-        scrollable(column(rows).width(Length::Fill)).height(Length::Fill)
+        scrollable(column(rows).width(Length::Fill)).height(Length::Fill),
+        volume(browser.volume, palette)
     ]
     .spacing(SPACING * 2.0);
     if let Some(notice) = &browser.notice {
         content = content.push(text(notice).size(TEXT_SIZE).color(palette.record));
     }
     content.into()
+}
+
+fn volume<'a>(volume: Volume, palette: Palette) -> Element<'a, Event> {
+    row![
+        text("Preview").size(TEXT_SIZE).color(palette.text_muted),
+        slider(VOLUME_RANGE, volume.0, Event::Volume).step(VOLUME_STEP),
+        text(volume.label())
+            .size(TEXT_SIZE)
+            .font(fonts::NUMBERS)
+            .color(palette.text_muted)
+            .width(VOLUME_LABEL_WIDTH)
+    ]
+    .spacing(SPACING * 2.0)
+    .align_y(Alignment::Center)
+    .into()
 }
 
 fn tree<'a>(
@@ -387,6 +458,52 @@ mod tests {
         assert_eq!(
             clicks(&music_listed(), "Drums"),
             [Event::Toggle(music().join("Drums"))]
+        );
+    }
+
+    fn is_close(a: f32, b: f32) -> bool {
+        (a - b).abs() < 1e-4
+    }
+
+    #[test]
+    fn the_preview_volume_starts_at_minus_6_db() {
+        let browser = Browser::new(places());
+        assert!(is_close(browser.preview_gain(), 0.501_19));
+        let mut ui = simulator(browser::view(&browser, Palette::GRAPHITE));
+        assert!(ui.find("Preview").is_ok());
+        assert!(ui.find("\u{2212}6.0 dB").is_ok());
+    }
+
+    #[test]
+    fn a_new_preview_volume_asks_for_its_gain() {
+        let mut browser = Browser::new(places());
+        let Some(Request::Volume(gain)) = browser.update(&Event::Volume(-12.0)) else {
+            panic!("no volume request");
+        };
+        assert!(is_close(gain, 0.251_19));
+        assert!(is_close(browser.preview_gain(), gain));
+    }
+
+    #[test]
+    fn the_lowest_preview_volume_is_silent() {
+        let mut browser = Browser::new(places());
+        assert_eq!(
+            browser.update(&Event::Volume(-60.0)),
+            Some(Request::Volume(0.0))
+        );
+        let mut ui = simulator(browser::view(&browser, Palette::GRAPHITE));
+        assert!(ui.find("Off").is_ok());
+    }
+
+    #[test]
+    fn new_places_keep_the_preview_volume() {
+        let mut browser = Browser::default();
+        browser.update(&Event::Volume(-12.0));
+        browser.set_places(places());
+        assert!(is_close(browser.preview_gain(), 0.251_19));
+        assert_eq!(
+            browser.update(&Event::Choose(1)),
+            Some(Request::List(music()))
         );
     }
 
