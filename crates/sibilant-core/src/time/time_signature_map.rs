@@ -2,9 +2,15 @@ use super::{Duration, Musical, Position, TimeSignature};
 
 const FIRST_BAR: i64 = 1;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TimeSignatureMap {
     segments: Vec<Segment>,
+}
+
+impl Default for TimeSignatureMap {
+    fn default() -> Self {
+        Self::new(TimeSignature::default())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -14,7 +20,7 @@ pub struct BarBeat {
     pub offset: Duration<Musical>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Segment {
     bar: i64,
     start: Position<Musical>,
@@ -125,6 +131,12 @@ mod tests {
 
     fn quarter_notes(quarter_notes: i64) -> Position<Musical> {
         Position::from_quarter_notes(quarter_notes)
+    }
+
+    #[test]
+    fn the_default_map_has_the_default_time_signature_everywhere() {
+        let map = TimeSignatureMap::default();
+        assert_eq!(map, TimeSignatureMap::new(TimeSignature::default()));
     }
 
     #[test]
