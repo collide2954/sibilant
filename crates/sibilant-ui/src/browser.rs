@@ -19,7 +19,17 @@ const ROW_PADDING: [f32; 2] = [2.0, 4.0];
 pub enum Event {
     Choose(usize),
     Toggle(PathBuf),
-    Grab(PathBuf),
+    Press(PathBuf),
+    Leave(PathBuf),
+    Release(PathBuf),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Request {
+    List(PathBuf),
+    Drag(PathBuf),
+    Preview(PathBuf),
+    StopPreview,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,6 +46,9 @@ pub struct Browser {
     listings: BTreeMap<PathBuf, Listing>,
     open: BTreeSet<PathBuf>,
     notice: Option<String>,
+    pressed: Option<PathBuf>,
+    dragged: bool,
+    previewing: Option<PathBuf>,
 }
 
 impl Browser {
@@ -46,23 +59,47 @@ impl Browser {
         }
     }
 
-    pub fn update(&mut self, event: &Event) -> Option<PathBuf> {
+    pub fn update(&mut self, event: &Event) -> Option<Request> {
         match event {
             Event::Choose(index) => {
                 let folder = self.places.get(*index)?.path.clone();
                 self.place = Some(*index);
-                self.request(folder)
+                self.list(folder)
             }
             Event::Toggle(folder) => {
                 if self.open.remove(folder) {
                     None
                 } else {
                     self.open.insert(folder.clone());
-                    self.request(folder.clone())
+                    self.list(folder.clone())
                 }
             }
-            Event::Grab(_) => None,
+            Event::Press(file) => {
+                self.pressed = Some(file.clone());
+                self.dragged = false;
+                None
+            }
+            Event::Leave(file) => {
+                let drag = self.pressed.as_ref() == Some(file) && !self.dragged;
+                self.dragged |= drag;
+                drag.then(|| Request::Drag(file.clone()))
+            }
+            Event::Release(file) => {
+                let click = self.pressed.take().as_ref() == Some(file) && !self.dragged;
+                self.dragged = false;
+                click.then(|| {
+                    if self.previewing.as_ref() == Some(file) {
+                        Request::StopPreview
+                    } else {
+                        Request::Preview(file.clone())
+                    }
+                })
+            }
         }
+    }
+
+    pub fn set_previewing(&mut self, file: Option<PathBuf>) {
+        self.previewing = file;
     }
 
     pub fn listed(&mut self, folder: PathBuf, result: Result<Vec<Entry>, String>) {
@@ -77,12 +114,12 @@ impl Browser {
         self.notice = notice;
     }
 
-    fn request(&mut self, folder: PathBuf) -> Option<PathBuf> {
+    fn list(&mut self, folder: PathBuf) -> Option<Request> {
         if self.listings.contains_key(&folder) {
             return None;
         }
         self.listings.insert(folder.clone(), Listing::Loading);
-        Some(folder)
+        Some(Request::List(folder))
     }
 }
 
@@ -144,7 +181,10 @@ fn tree<'a>(
                             tree(browser, &entry.path, indent + INDENT, palette, rows);
                         }
                     }
-                    EntryKind::Audio => rows.push(file_row(entry, indent, palette)),
+                    EntryKind::Audio => {
+                        let playing = browser.previewing.as_ref() == Some(&entry.path);
+                        rows.push(file_row(entry, playing, indent, palette));
+                    }
                 }
             }
         }
@@ -172,16 +212,23 @@ fn folder_row(entry: &Entry, open: bool, indent: f32, palette: Palette) -> Eleme
         .into()
 }
 
-fn file_row(entry: &Entry, indent: f32, palette: Palette) -> Element<'_, Event> {
+fn file_row(entry: &Entry, playing: bool, indent: f32, palette: Palette) -> Element<'_, Event> {
+    let (glyph, name) = if playing {
+        (Icon::Speaker, palette.accent)
+    } else {
+        (Icon::AudioFile, palette.text)
+    };
     let content = row![
         space().width(indent + ICON_SIZE + SPACING),
-        icon(Icon::AudioFile, palette.accent),
-        text(&entry.name).size(TEXT_SIZE).color(palette.text)
+        icon(glyph, palette.accent),
+        text(&entry.name).size(TEXT_SIZE).color(name)
     ]
     .spacing(SPACING);
     mouse_area(container(content).width(Length::Fill).padding(ROW_PADDING))
-        .on_press(Event::Grab(entry.path.clone()))
-        .interaction(mouse::Interaction::Grab)
+        .on_press(Event::Press(entry.path.clone()))
+        .on_release(Event::Release(entry.path.clone()))
+        .on_exit(Event::Leave(entry.path.clone()))
+        .interaction(mouse::Interaction::Pointer)
         .into()
 }
 
@@ -209,7 +256,8 @@ mod tests {
     use iced_test::simulator;
     use sibilant_media::{Entry, EntryKind, Place};
 
-    use crate::browser::{self, Browser, Event};
+    use crate::browser::{self, Browser, Event, Request};
+    use crate::icons::Icon;
     use crate::theme::Palette;
 
     fn music() -> PathBuf {
@@ -256,10 +304,17 @@ mod tests {
         ui.into_messages().collect()
     }
 
+    fn pad() -> PathBuf {
+        music().join("pad.wav")
+    }
+
     #[test]
     fn choosing_a_place_asks_once_for_its_folder() {
         let mut browser = Browser::new(places());
-        assert_eq!(browser.update(&Event::Choose(1)), Some(music()));
+        assert_eq!(
+            browser.update(&Event::Choose(1)),
+            Some(Request::List(music()))
+        );
         assert_eq!(browser.update(&Event::Choose(1)), None);
     }
 
@@ -269,16 +324,57 @@ mod tests {
         let drums = music().join("Drums");
         assert_eq!(
             browser.update(&Event::Toggle(drums.clone())),
-            Some(drums.clone())
+            Some(Request::List(drums.clone()))
         );
         assert_eq!(browser.update(&Event::Toggle(drums.clone())), None);
         assert_eq!(browser.update(&Event::Toggle(drums)), None);
     }
 
     #[test]
-    fn grabbing_a_file_asks_for_no_folder() {
+    fn a_click_on_a_file_asks_to_preview_it() {
         let mut browser = music_listed();
-        assert_eq!(browser.update(&Event::Grab(music().join("pad.wav"))), None);
+        assert_eq!(browser.update(&Event::Press(pad())), None);
+        assert_eq!(
+            browser.update(&Event::Release(pad())),
+            Some(Request::Preview(pad()))
+        );
+    }
+
+    #[test]
+    fn a_click_on_the_file_that_plays_asks_to_stop_it() {
+        let mut browser = music_listed();
+        browser.set_previewing(Some(pad()));
+        browser.update(&Event::Press(pad()));
+        assert_eq!(
+            browser.update(&Event::Release(pad())),
+            Some(Request::StopPreview)
+        );
+    }
+
+    #[test]
+    fn leaving_the_row_with_the_button_down_starts_a_drag_and_no_preview() {
+        let mut browser = music_listed();
+        browser.update(&Event::Press(pad()));
+        assert_eq!(
+            browser.update(&Event::Leave(pad())),
+            Some(Request::Drag(pad()))
+        );
+        assert_eq!(browser.update(&Event::Leave(pad())), None);
+        assert_eq!(browser.update(&Event::Release(pad())), None);
+    }
+
+    #[test]
+    fn moving_across_a_row_without_a_press_does_nothing() {
+        let mut browser = music_listed();
+        assert_eq!(browser.update(&Event::Leave(pad())), None);
+    }
+
+    #[test]
+    fn a_release_on_a_different_file_is_not_a_click() {
+        let mut browser = music_listed();
+        browser.update(&Event::Press(pad()));
+        let other = music().join("bass.wav");
+        assert_eq!(browser.update(&Event::Release(other)), None);
     }
 
     #[test]
@@ -295,10 +391,27 @@ mod tests {
     }
 
     #[test]
-    fn a_press_on_a_file_grabs_it() {
+    fn a_click_on_a_file_presses_and_releases_it() {
         assert_eq!(
             clicks(&music_listed(), "pad.wav"),
-            [Event::Grab(music().join("pad.wav"))]
+            [Event::Press(pad()), Event::Release(pad())]
+        );
+    }
+
+    #[test]
+    fn the_file_that_plays_shows_a_speaker() {
+        let mut browser = music_listed();
+        let speaker = Icon::Speaker.codepoint().to_string();
+        assert!(
+            simulator(browser::view(&browser, Palette::GRAPHITE))
+                .find(speaker.as_str())
+                .is_err()
+        );
+        browser.set_previewing(Some(pad()));
+        assert!(
+            simulator(browser::view(&browser, Palette::GRAPHITE))
+                .find(speaker.as_str())
+                .is_ok()
         );
     }
 

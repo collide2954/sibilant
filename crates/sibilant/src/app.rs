@@ -12,7 +12,7 @@ use sibilant_core::time::{Duration, Musical, Position};
 use sibilant_engine::arrangement::{Arrangement, AudioBuffer};
 use sibilant_engine::engine;
 use sibilant_media::{Entry, Place};
-use sibilant_ui::browser::{self, Browser};
+use sibilant_ui::browser::{self, Browser, Request};
 use sibilant_ui::command::Command;
 use sibilant_ui::theme::Palette;
 use sibilant_ui::timeline::{View, Viewport, Waveforms};
@@ -92,13 +92,7 @@ impl App {
     pub(crate) fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Command(command) => return self.run(command),
-            Message::Browser(event) => {
-                if let browser::Event::Grab(path) = &event {
-                    self.dragging = Some(path.clone());
-                    self.browser.set_notice(None);
-                }
-                return self.browse(&event);
-            }
+            Message::Browser(event) => return self.browse(&event),
             Message::Places(places) => {
                 self.browser = Browser::new(places);
                 return self.browse(&browser::Event::Choose(0));
@@ -176,14 +170,23 @@ impl App {
     }
 
     fn browse(&mut self, event: &browser::Event) -> Task<Message> {
-        let Some(folder) = self.browser.update(event) else {
-            return Task::none();
-        };
-        let listed = folder.clone();
-        Task::perform(
-            async move { sibilant_media::list_folder(&folder).map_err(|error| error.to_string()) },
-            move |result| Message::Listed(listed, result),
-        )
+        match self.browser.update(event) {
+            Some(Request::List(folder)) => {
+                let listed = folder.clone();
+                Task::perform(
+                    async move {
+                        sibilant_media::list_folder(&folder).map_err(|error| error.to_string())
+                    },
+                    move |result| Message::Listed(listed, result),
+                )
+            }
+            Some(Request::Drag(file)) => {
+                self.dragging = Some(file);
+                self.browser.set_notice(None);
+                Task::none()
+            }
+            Some(Request::Preview(_) | Request::StopPreview) | None => Task::none(),
+        }
     }
 
     pub(crate) fn subscription(&self) -> Subscription<Message> {
@@ -443,9 +446,21 @@ mod tests {
         let _ = app.update(Message::Loaded(placement, Ok(loaded(name))));
     }
 
+    fn kick() -> PathBuf {
+        music().join("kick.wav")
+    }
+
     fn grab(app: &mut App) {
-        let grab = browser::Event::Grab(music().join("kick.wav"));
-        let _ = app.update(Message::Browser(grab));
+        let _ = app.update(Message::Browser(browser::Event::Press(kick())));
+        let _ = app.update(Message::Browser(browser::Event::Leave(kick())));
+    }
+
+    #[test]
+    fn a_click_on_a_file_does_not_start_a_drag() {
+        let mut app = App::default();
+        let _ = app.update(Message::Browser(browser::Event::Press(kick())));
+        let _ = app.update(Message::Browser(browser::Event::Release(kick())));
+        assert!(!shows_the_new_track_hint(&app));
     }
 
     fn shows_the_new_track_hint(app: &App) -> bool {
