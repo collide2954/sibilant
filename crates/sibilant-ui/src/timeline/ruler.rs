@@ -14,7 +14,7 @@ const LABEL_SIZE: f32 = 11.0;
 const SHORT_LINE: f32 = HEIGHT / 3.0;
 
 struct Ruler<'a> {
-    view: View,
+    view: View<'a>,
     time_signatures: &'a TimeSignatureMap,
     palette: Palette,
 }
@@ -80,11 +80,11 @@ impl canvas::Program<Command> for Ruler<'_> {
     }
 }
 
-pub fn ruler(
-    view: View,
-    time_signatures: &TimeSignatureMap,
+pub fn ruler<'a>(
+    view: View<'a>,
+    time_signatures: &'a TimeSignatureMap,
     palette: Palette,
-) -> Element<'_, Command> {
+) -> Element<'a, Command> {
     let ruler = Ruler {
         view,
         time_signatures,
@@ -108,6 +108,7 @@ mod tests {
         let view = View {
             viewport,
             playhead: viewport.position_at(144.0),
+            ..View::default()
         };
         let time_signatures = TimeSignatureMap::default();
         let ruler = ruler(view, &time_signatures, palette);

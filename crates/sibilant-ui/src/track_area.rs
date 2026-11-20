@@ -19,7 +19,11 @@ const TOGGLE_SIZE: f32 = 20.0;
 const TOGGLE_SPACING: f32 = 4.0;
 const RADIUS: f32 = 4.0;
 
-pub fn view(project: &Project, timeline: View, palette: Palette) -> Element<'_, Command> {
+pub fn view<'a>(
+    project: &'a Project,
+    timeline: View<'a>,
+    palette: Palette,
+) -> Element<'a, Command> {
     let rows = column(
         project
             .tracks()
@@ -44,7 +48,7 @@ pub fn view(project: &Project, timeline: View, palette: Palette) -> Element<'_, 
 fn track_row<'a>(
     project: &'a Project,
     track: &'a Track,
-    timeline: View,
+    timeline: View<'a>,
     palette: Palette,
 ) -> Element<'a, Command> {
     let color = palette.track_color(track.color());

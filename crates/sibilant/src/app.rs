@@ -6,7 +6,7 @@ use sibilant_core::time::Position;
 use sibilant_engine::engine;
 use sibilant_ui::command::Command;
 use sibilant_ui::theme::Palette;
-use sibilant_ui::timeline::{View, Viewport};
+use sibilant_ui::timeline::{View, Viewport, Waveforms};
 use sibilant_ui::transport::{self, Display};
 use sibilant_ui::{shell, track_area};
 
@@ -24,6 +24,7 @@ pub(crate) struct App {
     history: History<Project>,
     ids: Ids,
     viewport: Viewport,
+    waveforms: Waveforms,
     audio: Option<Audio>,
     metronome: bool,
     playing: bool,
@@ -38,6 +39,7 @@ impl Default for App {
             history: History::new(project),
             ids,
             viewport: Viewport::default(),
+            waveforms: Waveforms::new(),
             audio: None,
             metronome: false,
             playing: false,
@@ -139,6 +141,7 @@ impl App {
         let timeline = View {
             viewport: self.viewport,
             playhead: position,
+            waveforms: &self.waveforms,
         };
         let tracks = track_area::view(project, timeline, self.palette);
         shell::view(self.palette, transport, tracks).map(Message::Command)

@@ -4,7 +4,7 @@ use iced::{Element, Length, Point, Rectangle, Renderer, Size, Theme, mouse};
 use sibilant_core::project::{Clip, Project, Track};
 use sibilant_core::time::{Musical, Position};
 
-use super::{View, Viewport, draw_playhead, wheel};
+use super::{View, Viewport, WaveColumn, draw_playhead, wheel};
 use crate::command::Command;
 use crate::theme::Palette;
 
@@ -12,9 +12,11 @@ const CLIP_INSET: f32 = 2.0;
 const CLIP_GAP: f32 = 1.0;
 const NAME_INSET: f32 = 4.0;
 const NAME_SIZE: f32 = 11.0;
+const WAVE_MARGIN: f32 = 2.0;
+const WAVE_ALPHA: f32 = 0.5;
 
 struct Lane<'a> {
-    view: View,
+    view: View<'a>,
     project: &'a Project,
     track: &'a Track,
     palette: Palette,
@@ -79,6 +81,13 @@ impl canvas::Program<Command> for Lane<'_> {
                 ),
             );
             frame.fill_rectangle(area.position(), area.size(), iced::Color::from(color));
+            if let Some(peaks) = self.view.waveforms.get(&clip_box.clip.source()) {
+                let columns =
+                    self.view
+                        .viewport
+                        .waveform(self.project, &clip_box, peaks, bounds.width);
+                draw_waveform(&mut frame, area, &columns, palette);
+            }
             frame.with_clip(area, |frame| {
                 frame.fill_text(canvas::Text {
                     content: clip_box.clip.name().to_owned(),
@@ -94,8 +103,29 @@ impl canvas::Program<Command> for Lane<'_> {
     }
 }
 
+fn draw_waveform(frame: &mut Frame, area: Rectangle, columns: &[WaveColumn], palette: Palette) {
+    let middle = area.center_y();
+    let half = area.height / 2.0 - WAVE_MARGIN;
+    let color = iced::Color {
+        a: WAVE_ALPHA,
+        ..iced::Color::from(palette.on_track_color)
+    };
+    for column in columns
+        .iter()
+        .filter(|column| column.x < area.x + area.width)
+    {
+        let top = (middle - column.peak.max * half).max(area.y);
+        let bottom = (middle - column.peak.min * half).min(area.y + area.height);
+        frame.fill_rectangle(
+            Point::new(column.x, top),
+            Size::new(1.0, (bottom - top).max(1.0)),
+            color,
+        );
+    }
+}
+
 pub fn lane<'a>(
-    view: View,
+    view: View<'a>,
     project: &'a Project,
     track: &'a Track,
     palette: Palette,
@@ -159,7 +189,11 @@ mod tests {
 
     use crate::pixels::Pixels;
     use crate::theme::Palette;
-    use crate::timeline::{View, Viewport, lane};
+    use std::sync::Arc;
+
+    use sibilant_media::{Audio, Peaks};
+
+    use crate::timeline::{View, Viewport, Waveforms, lane};
 
     fn quarter_notes(quarter_notes: i64) -> Position<Musical> {
         Position::from_quarter_notes(quarter_notes)
@@ -232,10 +266,31 @@ mod tests {
         let view = View {
             viewport,
             playhead: viewport.position_at(144.0),
+            ..View::default()
         };
         let lane = lane(view, &project, first_track(&project), palette);
         let pixels = Pixels::render(lane, Size::new(400.0, 64.0));
         assert_eq!(pixels.color_at(144, 32), palette.accent);
         assert_eq!(pixels.color_at(146, 32), palette.background);
+    }
+
+    #[test]
+    fn a_clip_shows_the_waveform_of_its_audio() {
+        let palette = Palette::GRAPHITE;
+        let project = project_with_clips(&[0], 2, TempoMap::default());
+        let source = first_track(&project).timeline().next().unwrap().1.source();
+        let mut samples = [1.0, -1.0].repeat(24_000);
+        samples.resize(96_000, 0.0);
+        let peaks = Arc::new(Peaks::of(&Audio::new(48_000, vec![samples])));
+        let waveforms = Waveforms::from([(source, peaks)]);
+        let view = View {
+            waveforms: &waveforms,
+            ..View::default()
+        };
+        let lane = lane(view, &project, first_track(&project), palette);
+        let pixels = Pixels::render(lane, Size::new(400.0, 64.0));
+        let clip = palette.track_color(first_track(&project).color());
+        assert_ne!(pixels.color_at(32, 20), clip);
+        assert_eq!(pixels.color_at(96, 20), clip);
     }
 }

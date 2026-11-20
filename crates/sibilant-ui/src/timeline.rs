@@ -3,10 +3,15 @@ mod lane;
 mod ruler;
 mod waveform;
 
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
 use iced::keyboard::{self, Modifiers};
 use iced::widget::canvas::{Action, Event, Frame};
 use iced::{Point, Rectangle, Size, mouse};
+use sibilant_core::project::SourceId;
 use sibilant_core::time::{Duration, Musical, Position, TICKS_PER_QUARTER_NOTE};
+use sibilant_media::Peaks;
 
 use crate::command::Command;
 use crate::theme::Palette;
@@ -36,22 +41,28 @@ fn wheel(
     }
 }
 
+pub type Waveforms = BTreeMap<SourceId, Arc<Peaks>>;
+
+static NO_WAVEFORMS: Waveforms = BTreeMap::new();
+
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct View {
+pub struct View<'a> {
     pub viewport: Viewport,
     pub playhead: Position<Musical>,
+    pub waveforms: &'a Waveforms,
 }
 
-impl Default for View {
+impl Default for View<'_> {
     fn default() -> Self {
         Self {
             viewport: Viewport::default(),
             playhead: Position::START,
+            waveforms: &NO_WAVEFORMS,
         }
     }
 }
 
-fn draw_playhead(frame: &mut Frame, view: View, palette: Palette) {
+fn draw_playhead(frame: &mut Frame, view: View<'_>, palette: Palette) {
     let size = frame.size();
     if let Some(x) = view.viewport.visible_x(view.playhead, size.width) {
         frame.fill_rectangle(
