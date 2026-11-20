@@ -27,6 +27,10 @@ impl Audio {
         })
     }
 
+    pub(crate) fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
     pub(crate) fn playhead(&self) -> Position<Clock> {
         timing::clock_of_frame(self.sample_rate, self.controller.playhead())
     }

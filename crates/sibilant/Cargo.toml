@@ -16,6 +16,7 @@ sibilant-media.workspace = true
 sibilant-ui.workspace = true
 
 [dev-dependencies]
+hound.workspace = true
 iced_test.workspace = true
 
 [lints]

@@ -1,10 +1,15 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
-use iced::{Element, Subscription, Task, Theme, keyboard, window};
+use iced::{Element, Subscription, Task, Theme, event, keyboard, mouse, window};
 use sibilant_core::history::History;
 use sibilant_core::mix::Mix;
-use sibilant_core::project::{EditError, Ids, Project, TrackId};
-use sibilant_core::time::Position;
+use sibilant_core::project::{
+    AudioSource, Clip, EditError, Ids, Project, Region, SourceId, TrackId,
+};
+use sibilant_core::time::{Duration, Musical, Position};
+use sibilant_engine::arrangement::{Arrangement, AudioBuffer};
 use sibilant_engine::engine;
 use sibilant_media::{Entry, Place};
 use sibilant_ui::browser::{self, Browser};
@@ -15,6 +20,13 @@ use sibilant_ui::transport::{self, Display};
 use sibilant_ui::{shell, track_area};
 
 use crate::audio::Audio;
+use crate::library::{self, LoadedAudio};
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Placement {
+    pub(crate) track: Option<TrackId>,
+    pub(crate) start: Position<Musical>,
+}
 
 #[derive(Debug, Clone)]
 pub(crate) enum Message {
@@ -22,6 +34,8 @@ pub(crate) enum Message {
     Browser(browser::Event),
     Places(Vec<Place>),
     Listed(PathBuf, Result<Vec<Entry>, String>),
+    Loaded(Placement, Result<LoadedAudio, String>),
+    DragEnded,
     Frame,
 }
 
@@ -32,6 +46,8 @@ pub(crate) struct App {
     ids: Ids,
     viewport: Viewport,
     browser: Browser,
+    dragging: Option<PathBuf>,
+    pool: BTreeMap<SourceId, Arc<AudioBuffer>>,
     waveforms: Waveforms,
     audio: Option<Audio>,
     metronome: bool,
@@ -48,6 +64,8 @@ impl Default for App {
             ids,
             viewport: Viewport::default(),
             browser: Browser::default(),
+            dragging: None,
+            pool: BTreeMap::new(),
             waveforms: Waveforms::new(),
             audio: None,
             metronome: false,
@@ -73,14 +91,26 @@ impl App {
 
     pub(crate) fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Command(command) => self.run(command),
-            Message::Browser(event) => return self.browse(&event),
+            Message::Command(command) => return self.run(command),
+            Message::Browser(event) => {
+                if let browser::Event::Grab(path) = &event {
+                    self.dragging = Some(path.clone());
+                    self.browser.set_notice(None);
+                }
+                return self.browse(&event);
+            }
             Message::Places(places) => {
                 self.browser = Browser::new(places);
                 return self.browse(&browser::Event::Choose(0));
             }
             Message::Listed(folder, result) => self.browser.listed(folder, result),
+            Message::Loaded(placement, Ok(loaded)) => self.place(placement, loaded),
+            Message::Loaded(_, Err(message)) => self.browser.set_notice(Some(message)),
+            Message::DragEnded => self.dragging = None,
             Message::Frame => {
+                if let Some(audio) = self.audio.as_mut() {
+                    audio.controller.release_old_arrangements();
+                }
                 self.playing = self
                     .audio
                     .as_ref()
@@ -88,6 +118,61 @@ impl App {
             }
         }
         Task::none()
+    }
+
+    fn import(&mut self, placement: Placement) -> Task<Message> {
+        let Some(path) = self.dragging.take() else {
+            return Task::none();
+        };
+        let sample_rate = self.audio.as_ref().map(Audio::sample_rate);
+        Task::perform(
+            async move { library::load(&path, sample_rate) },
+            move |result| Message::Loaded(placement, result),
+        )
+    }
+
+    fn place(&mut self, placement: Placement, loaded: LoadedAudio) {
+        let source = self.ids.source();
+        let track = placement.track.unwrap_or_else(|| self.ids.track());
+        let region = Region {
+            start: Duration::ZERO,
+            length: loaded.length,
+        };
+        let clip = Clip::new(loaded.name.clone(), source, region);
+        let audio_source = AudioSource::new(source, loaded.path, loaded.length);
+        let edited = self
+            .history
+            .present()
+            .add_source(audio_source)
+            .and_then(|project| match placement.track {
+                Some(_) => Ok(project),
+                None => project.add_track(track, project.next_track_name()),
+            })
+            .and_then(|project| project.place_clip(track, placement.start, clip));
+        match edited {
+            Ok(project) => {
+                self.pool.insert(source, loaded.playback);
+                self.waveforms.insert(source, loaded.peaks);
+                self.history.commit(project);
+                self.sync();
+            }
+            Err(error) => self
+                .browser
+                .set_notice(Some(format!("{}: {error}", loaded.name))),
+        }
+    }
+
+    fn sync(&mut self) {
+        let Some(audio) = self.audio.as_mut() else {
+            return;
+        };
+        let pool = &self.pool;
+        let arrangement =
+            Arrangement::of_project(self.history.present(), audio.sample_rate(), |source| {
+                pool.get(&source).cloned()
+            });
+        audio.controller.release_old_arrangements();
+        audio.controller.replace_arrangement(arrangement);
     }
 
     fn browse(&mut self, event: &browser::Event) -> Task<Message> {
@@ -105,14 +190,17 @@ impl App {
         let shortcuts = keyboard::listen()
             .filter_map(Command::from_key_event)
             .map(Message::Command);
-        if self.playing {
-            Subscription::batch([shortcuts, window::frames().map(|_| Message::Frame)])
-        } else {
-            shortcuts
-        }
+        let frames = self
+            .playing
+            .then(|| window::frames().map(|_| Message::Frame));
+        let drag_end = self
+            .dragging
+            .is_some()
+            .then(|| event::listen_with(release_that_no_track_takes));
+        Subscription::batch([Some(shortcuts), frames, drag_end].into_iter().flatten())
     }
 
-    fn run(&mut self, command: Command) {
+    fn run(&mut self, command: Command) -> Task<Message> {
         match command {
             Command::AddTrack => {
                 let id = self.ids.track();
@@ -126,9 +214,11 @@ impl App {
             }
             Command::Undo => {
                 self.history.undo();
+                self.sync();
             }
             Command::Redo => {
                 self.history.redo();
+                self.sync();
             }
             Command::ScrollTimeline { pixels } => {
                 self.viewport = self.viewport.scrolled(pixels);
@@ -142,8 +232,9 @@ impl App {
                 self.metronome = !self.metronome;
                 self.send(engine::Command::SetMetronome(self.metronome));
             }
-            Command::Drop { .. } => {}
+            Command::Drop { track, start } => return self.import(Placement { track, start }),
         }
+        Task::none()
     }
 
     fn send(&mut self, command: engine::Command) -> bool {
@@ -176,7 +267,7 @@ impl App {
             viewport: self.viewport,
             playhead: position,
             waveforms: &self.waveforms,
-            dragging: false,
+            dragging: self.dragging.is_some(),
         };
         let tracks = track_area::view(project, timeline, self.palette).map(Message::Command);
         shell::view(self.palette, transport, browser, tracks)
@@ -189,8 +280,22 @@ impl App {
     fn edit(&mut self, edit: impl FnOnce(&Project) -> Result<Project, EditError>) {
         if let Ok(project) = edit(self.history.present()) {
             self.history.commit(project);
+            self.sync();
         }
     }
+}
+
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "event::listen_with gives each event by value"
+)]
+fn release_that_no_track_takes(
+    event: iced::Event,
+    status: event::Status,
+    _window: window::Id,
+) -> Option<Message> {
+    let release = iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left));
+    (event == release && status == event::Status::Ignored).then_some(Message::DragEnded)
 }
 
 fn change_mix(
@@ -208,11 +313,17 @@ fn change_mix(
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
 
     use iced_test::simulator;
     use sibilant_core::project::{Project, Track, TrackId};
-    use sibilant_core::time::Position;
+    use sibilant_core::time::{Duration, Musical, Position};
+    use sibilant_engine::arrangement::AudioBuffer;
+    use sibilant_media::Peaks;
+
+    use crate::app::{Placement, release_that_no_track_takes};
+    use crate::library::LoadedAudio;
     use sibilant_engine::engine::Engine;
     use sibilant_media::{Entry, EntryKind, Place};
     use sibilant_ui::browser;
@@ -311,6 +422,167 @@ mod tests {
         };
         let _ = app.update(Message::Listed(music(), Ok(vec![kick])));
         assert!(simulator(app.view()).find("kick.wav").is_ok());
+    }
+
+    fn loaded(name: &str) -> LoadedAudio {
+        let samples = vec![0.5; 48_000];
+        LoadedAudio {
+            path: PathBuf::from(format!("{name}.wav")),
+            name: name.into(),
+            length: Duration::from_seconds(1),
+            playback: Arc::new(AudioBuffer::new(vec![samples.clone()])),
+            peaks: Arc::new(Peaks::of(&sibilant_media::Audio::new(
+                48_000,
+                vec![samples],
+            ))),
+        }
+    }
+
+    fn place(app: &mut App, track: Option<TrackId>, start: Position<Musical>, name: &str) {
+        let placement = Placement { track, start };
+        let _ = app.update(Message::Loaded(placement, Ok(loaded(name))));
+    }
+
+    fn grab(app: &mut App) {
+        let grab = browser::Event::Grab(music().join("kick.wav"));
+        let _ = app.update(Message::Browser(grab));
+    }
+
+    fn shows_the_new_track_hint(app: &App) -> bool {
+        simulator(app.view())
+            .find("Drop here for a new track")
+            .is_ok()
+    }
+
+    fn drop_for_a_new_track() -> Message {
+        Message::Command(Command::Drop {
+            track: None,
+            start: Position::START,
+        })
+    }
+
+    #[test]
+    fn a_press_on_a_file_in_the_browser_starts_a_drag() {
+        let mut app = App::default();
+        grab(&mut app);
+        assert!(shows_the_new_track_hint(&app));
+    }
+
+    #[test]
+    fn a_release_that_no_track_takes_ends_the_drag() {
+        let mut app = App::default();
+        grab(&mut app);
+        let _ = app.update(Message::DragEnded);
+        assert!(!shows_the_new_track_hint(&app));
+    }
+
+    #[test]
+    fn a_drop_loads_the_dragged_file_in_the_background_and_ends_the_drag() {
+        let mut app = App::default();
+        grab(&mut app);
+        assert_eq!(app.update(drop_for_a_new_track()).units(), 1);
+        assert!(!shows_the_new_track_hint(&app));
+    }
+
+    #[test]
+    fn only_a_left_release_that_no_track_takes_ends_a_drag() {
+        let release = |button| iced::Event::Mouse(iced::mouse::Event::ButtonReleased(button));
+        let left = release(iced::mouse::Button::Left);
+        let window = iced::window::Id::unique();
+        let ends = |event, status| {
+            release_that_no_track_takes(event, status, window)
+                .is_some_and(|message| matches!(message, Message::DragEnded))
+        };
+        assert!(ends(left.clone(), iced::event::Status::Ignored));
+        assert!(!ends(left, iced::event::Status::Captured));
+        let right = release(iced::mouse::Button::Right);
+        assert!(!ends(right, iced::event::Status::Ignored));
+    }
+
+    #[test]
+    fn a_drop_without_a_dragged_file_loads_nothing() {
+        let mut app = App::default();
+        assert_eq!(app.update(drop_for_a_new_track()).units(), 0);
+    }
+
+    #[test]
+    fn a_loaded_file_becomes_a_clip_at_the_drop_position() {
+        let mut app = App::default();
+        let track = first_track(&app).id();
+        place(
+            &mut app,
+            Some(track),
+            Position::from_quarter_notes(4),
+            "kick",
+        );
+        let (start, clip) = first_track(&app).timeline().next().unwrap();
+        assert_eq!(start, Position::from_quarter_notes(4));
+        assert_eq!(clip.name(), "kick");
+        let source = clip.source();
+        assert_eq!(
+            project(&app).source(source).unwrap().path(),
+            Path::new("kick.wav")
+        );
+        assert!(app.waveforms.contains_key(&source));
+    }
+
+    #[test]
+    fn one_undo_removes_the_clip_and_its_source() {
+        let mut app = App::default();
+        let track = first_track(&app).id();
+        place(&mut app, Some(track), Position::START, "kick");
+        run(&mut app, Command::Undo);
+        assert_eq!(first_track(&app).timeline().len(), 0);
+        assert_eq!(project(&app).sources().len(), 0);
+    }
+
+    #[test]
+    fn a_file_dropped_for_a_new_track_gets_its_own_track() {
+        let mut app = App::default();
+        place(&mut app, None, Position::START, "pad");
+        assert_eq!(track_names(&app), ["Audio 1", "Audio 2", "Audio 3"]);
+        let added = project(&app).tracks().last().unwrap();
+        assert_eq!(added.timeline().next().unwrap().1.name(), "pad");
+        run(&mut app, Command::Undo);
+        assert_eq!(track_names(&app).len(), 2);
+    }
+
+    #[test]
+    fn a_file_that_cannot_be_loaded_shows_why_in_the_browser() {
+        let mut app = App::default();
+        let placement = Placement {
+            track: None,
+            start: Position::START,
+        };
+        let failure = Err("kick.wav: not a WAV file".into());
+        let _ = app.update(Message::Loaded(placement, failure));
+        assert!(
+            simulator(app.view())
+                .find("kick.wav: not a WAV file")
+                .is_ok()
+        );
+    }
+
+    fn loudest(buffer: &[f32]) -> f32 {
+        buffer
+            .iter()
+            .fold(0.0, |loudest, sample| loudest.max(sample.abs()))
+    }
+
+    #[test]
+    fn the_engine_plays_a_placed_clip_until_an_undo_removes_it() {
+        let (mut app, mut engine) = with_simulated_audio();
+        let track = first_track(&app).id();
+        place(&mut app, Some(track), Position::START, "kick");
+        run(&mut app, Command::PlayOrStop);
+        let mut buffer = vec![0.0; 9_600];
+        engine.process(&mut buffer, 2);
+        assert!(loudest(&buffer) > 0.4);
+        run(&mut app, Command::Undo);
+        run(&mut app, Command::PlayOrStop);
+        run(&mut app, Command::PlayOrStop);
+        engine.process(&mut buffer, 2);
+        assert_eq!(loudest(&buffer), 0.0);
     }
 
     #[test]

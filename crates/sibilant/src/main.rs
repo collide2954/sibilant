@@ -1,5 +1,6 @@
 mod app;
 mod audio;
+mod library;
 
 use app::App;
 use sibilant_ui::{fonts, icons};
