@@ -4,8 +4,8 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use rtrb::{Consumer, Producer, RingBuffer};
 use sibilant_core::time::{Musical, Position};
 
+use crate::arrangement::Arrangement;
 use crate::click::ClickVoice;
-use crate::timing::Timing;
 
 const QUEUE_CAPACITY: usize = 256;
 
@@ -30,7 +30,7 @@ pub struct Controller {
 
 #[derive(Debug)]
 pub struct Engine {
-    timing: Timing,
+    arrangement: Arrangement,
     commands: Consumer<Command>,
     shared: Arc<Shared>,
     playing: bool,
@@ -41,19 +41,19 @@ pub struct Engine {
     click: ClickVoice,
 }
 
-pub fn new(timing: Timing) -> (Controller, Engine) {
+pub fn new(arrangement: Arrangement) -> (Controller, Engine) {
     let (producer, consumer) = RingBuffer::new(QUEUE_CAPACITY);
     let shared = Arc::new(Shared::default());
     let marker = Position::START;
-    let start = timing.frame_of(marker);
+    let start = arrangement.timing().frame_of(marker);
     shared.playhead.store(start, Ordering::Relaxed);
     let controller = Controller {
         commands: producer,
         shared: Arc::clone(&shared),
     };
-    let click = ClickVoice::new(timing.sample_rate());
+    let click = ClickVoice::new(arrangement.timing().sample_rate());
     let engine = Engine {
-        timing,
+        arrangement,
         commands: consumer,
         shared,
         playing: false,
@@ -88,14 +88,19 @@ impl Engine {
         output.fill(0.0);
         let start = self.playhead;
         let end = start + frames_in(output, channels);
-        let mut clicks = (self.playing && self.metronome).then(|| self.timing.clicks(start, end));
+        if self.playing {
+            mix_clips(&self.arrangement, output, channels, start, end);
+        }
+        let timing = self.arrangement.timing();
+        let mut clicks = (self.playing && self.metronome).then(|| timing.clicks(start, end));
         let mut next_click = clicks.as_mut().and_then(Iterator::next);
         for (frame, samples) in (start..).zip(output.chunks_exact_mut(channels)) {
             while let Some(click) = next_click.filter(|click| click.frame == frame) {
                 self.click.trigger(click.accent);
                 next_click = clicks.as_mut().and_then(Iterator::next);
             }
-            samples.fill(self.click.next_sample());
+            let click = self.click.next_sample();
+            add(samples, [click, click]);
         }
         if self.playing {
             self.playhead = end;
@@ -105,14 +110,15 @@ impl Engine {
     }
 
     fn apply(&mut self, command: Command) {
+        let marker = self.arrangement.timing().frame_of(self.marker);
         match command {
             Command::TogglePlay if self.playing => {
                 self.stopped_at = self.playhead;
-                self.playhead = self.timing.frame_of(self.marker);
+                self.playhead = marker;
                 self.playing = false;
             }
             Command::TogglePlay => {
-                self.playhead = self.timing.frame_of(self.marker);
+                self.playhead = marker;
                 self.playing = true;
             }
             Command::Continue if !self.playing => {
@@ -125,30 +131,114 @@ impl Engine {
     }
 }
 
+fn mix_clips(arrangement: &Arrangement, output: &mut [f32], channels: usize, start: i64, end: i64) {
+    for track in arrangement.tracks() {
+        let first = track.clips.partition_point(|clip| clip.end <= start);
+        for clip in track.clips[first..]
+            .iter()
+            .take_while(|clip| clip.start < end)
+        {
+            let from = clip.start.max(start);
+            let skip = usize::try_from(from - start).unwrap_or(0);
+            let frames =
+                (from..clip.end.min(end)).zip(output.chunks_exact_mut(channels).skip(skip));
+            for (frame, samples) in frames {
+                if let Some([left, right]) = clip.sample(frame) {
+                    add(samples, [left * track.gains[0], right * track.gains[1]]);
+                }
+            }
+        }
+    }
+}
+
+fn add(samples: &mut [f32], [left, right]: [f32; 2]) {
+    match samples {
+        [mono] => *mono += f32::midpoint(left, right),
+        [first, second, ..] => {
+            *first += left;
+            *second += right;
+        }
+        [] => {}
+    }
+}
+
 fn frames_in(output: &[f32], channels: usize) -> i64 {
     i64::try_from(output.len() / channels).unwrap_or(i64::MAX)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use assert_no_alloc::assert_no_alloc;
     use sibilant_core::time::{TempoMap, TimeSignatureMap};
 
+    use crate::arrangement::{Arrangement, AudioBuffer, ClipPlayback, TrackPlayback};
     use crate::engine::{self, Command, Controller, Engine};
     use crate::timing::Timing;
 
+    fn timing() -> Timing {
+        Timing::new(48_000, TempoMap::default(), TimeSignatureMap::default())
+    }
+
+    fn engine_with(tracks: Vec<TrackPlayback>) -> (Controller, Engine) {
+        engine::new(Arrangement::new(timing(), tracks))
+    }
+
     fn engine() -> (Controller, Engine) {
-        engine::new(Timing::new(
-            48_000,
-            TempoMap::default(),
-            TimeSignatureMap::default(),
-        ))
+        engine_with(Vec::new())
+    }
+
+    fn playing(tracks: Vec<TrackPlayback>) -> Engine {
+        let (mut controller, engine) = engine_with(tracks);
+        controller.send(Command::TogglePlay);
+        engine
+    }
+
+    fn track(gains: [f32; 2], clip: ClipPlayback) -> TrackPlayback {
+        TrackPlayback {
+            gains,
+            clips: vec![clip],
+        }
+    }
+
+    fn clip(start: i64, end: i64, offset: i64, fade: i64, audio: Vec<Vec<f32>>) -> ClipPlayback {
+        ClipPlayback {
+            start,
+            end,
+            offset,
+            fade,
+            audio: Arc::new(AudioBuffer::new(audio)),
+        }
+    }
+
+    fn render(engine: &mut Engine, frames: usize, channels: usize) -> Vec<f32> {
+        let mut buffer = vec![1.0; frames * channels];
+        engine.process(&mut buffer, channels);
+        buffer
     }
 
     fn run(engine: &mut Engine, frames: usize) -> Vec<f32> {
-        let mut buffer = vec![1.0; frames * 2];
-        engine.process(&mut buffer, 2);
+        render(engine, frames, 2)
+    }
+
+    fn channel(buffer: &[f32], channels: usize, index: usize) -> Vec<f32> {
         buffer
+            .iter()
+            .skip(index)
+            .step_by(channels)
+            .copied()
+            .collect()
+    }
+
+    fn left(buffer: &[f32]) -> Vec<f32> {
+        channel(buffer, 2, 0)
+    }
+
+    fn peak(samples: &[f32]) -> f32 {
+        samples
+            .iter()
+            .fold(0.0, |peak, sample| peak.max(sample.abs()))
     }
 
     #[test]
@@ -161,7 +251,9 @@ mod tests {
 
     #[test]
     fn a_stopped_engine_fills_the_buffer_with_silence() {
-        let (_controller, mut engine) = engine();
+        let audio = vec![vec![0.5; 1_000]];
+        let (_controller, mut engine) =
+            engine_with(vec![track([1.0, 1.0], clip(0, 1_000, 0, 1, audio))]);
         assert!(run(&mut engine, 512).iter().all(|sample| *sample == 0.0));
     }
 
@@ -186,18 +278,115 @@ mod tests {
         assert_eq!(controller.playhead(), 0);
     }
 
-    fn left(buffer: &[f32]) -> Vec<f32> {
-        buffer.iter().step_by(2).copied().collect()
+    #[test]
+    fn continue_plays_from_where_playback_stopped() {
+        let (mut controller, mut engine) = engine();
+        controller.send(Command::TogglePlay);
+        let _ = run(&mut engine, 1_000);
+        controller.send(Command::TogglePlay);
+        let _ = run(&mut engine, 10);
+        controller.send(Command::Continue);
+        let _ = run(&mut engine, 500);
+        assert_eq!(controller.playhead(), 1_500);
     }
 
-    fn peak(samples: &[f32]) -> f32 {
-        samples
-            .iter()
-            .fold(0.0, |peak, sample| peak.max(sample.abs()))
+    #[test]
+    fn a_clip_plays_its_audio_between_its_start_and_its_end() {
+        let audio = vec![vec![0.5; 2_000]];
+        let mut engine = playing(vec![track([1.0, 1.0], clip(100, 1_100, 0, 10, audio))]);
+        let left = left(&run(&mut engine, 1_500));
+        assert_eq!(peak(&left[..100]), 0.0);
+        assert_eq!(left[200..1_000], [0.5; 800]);
+        assert_eq!(peak(&left[1_100..]), 0.0);
+    }
+
+    #[test]
+    fn the_offset_chooses_the_first_frame_of_the_audio() {
+        let ramp: Vec<f32> = (0..1_000_u16)
+            .map(|index| f32::from(index) / 1_000.0)
+            .collect();
+        let mut engine = playing(vec![track(
+            [1.0, 1.0],
+            clip(0, 500, 300, 1, vec![ramp.clone()]),
+        )]);
+        let left = left(&run(&mut engine, 500));
+        assert_eq!(left[50], ramp[350]);
+    }
+
+    #[test]
+    fn a_clip_fades_in_and_out_over_its_fade_frames() {
+        let mut engine = playing(vec![track(
+            [1.0, 1.0],
+            clip(0, 20, 0, 4, vec![vec![1.0; 20]]),
+        )]);
+        let left = left(&run(&mut engine, 20));
+        assert_eq!(left[..5], [0.0, 0.25, 0.5, 0.75, 1.0]);
+        assert_eq!(left[15..], [1.0, 0.75, 0.5, 0.25, 0.0]);
+    }
+
+    #[test]
+    fn the_gains_of_a_track_set_the_level_of_each_channel() {
+        let audio = vec![vec![1.0; 100], vec![1.0; 100]];
+        let mut engine = playing(vec![track([0.5, 0.25], clip(0, 100, 0, 1, audio))]);
+        let buffer = run(&mut engine, 100);
+        assert_eq!(buffer[100..102], [0.5, 0.25]);
+    }
+
+    #[test]
+    fn mono_audio_plays_on_the_left_and_the_right_channel() {
+        let mut engine = playing(vec![track(
+            [1.0, 1.0],
+            clip(0, 100, 0, 1, vec![vec![0.5; 100]]),
+        )]);
+        let buffer = run(&mut engine, 100);
+        assert_eq!(buffer[100..102], [0.5, 0.5]);
+    }
+
+    #[test]
+    fn the_tracks_add_together() {
+        let audio = || vec![vec![0.25; 100]];
+        let mut engine = playing(vec![
+            track([1.0, 1.0], clip(0, 100, 0, 1, audio())),
+            track([1.0, 1.0], clip(0, 100, 0, 1, audio())),
+        ]);
+        assert_eq!(left(&run(&mut engine, 100))[50], 0.5);
+    }
+
+    #[test]
+    fn a_mono_output_gets_the_average_of_the_left_and_the_right_channel() {
+        let mut engine = playing(vec![track(
+            [1.0, 0.0],
+            clip(0, 100, 0, 1, vec![vec![1.0; 100]]),
+        )]);
+        assert_eq!(render(&mut engine, 100, 1)[50], 0.5);
+    }
+
+    #[test]
+    fn only_the_first_two_channels_of_the_output_get_the_mix_and_the_click() {
+        let (mut controller, mut engine) = engine_with(vec![track(
+            [1.0, 1.0],
+            clip(0, 4_800, 0, 1, vec![vec![0.5; 4_800]]),
+        )]);
+        controller.send(Command::SetMetronome(true));
+        controller.send(Command::TogglePlay);
+        let buffer = render(&mut engine, 4_800, 4);
+        assert!(peak(&channel(&buffer, 4, 0)) > 0.1);
+        assert!(peak(&channel(&buffer, 4, 1)) > 0.1);
+        assert_eq!(peak(&channel(&buffer, 4, 2)), 0.0);
+        assert_eq!(peak(&channel(&buffer, 4, 3)), 0.0);
     }
 
     fn metronome_on() -> (Controller, Engine) {
         let (mut controller, engine) = engine();
+        controller.send(Command::SetMetronome(true));
+        controller.send(Command::TogglePlay);
+        (controller, engine)
+    }
+
+    fn busy() -> (Controller, Engine) {
+        let audio = vec![vec![0.25; 30_000], vec![-0.25; 30_000]];
+        let (mut controller, engine) =
+            engine_with(vec![track([0.8, 0.6], clip(1_000, 31_000, 0, 192, audio))]);
         controller.send(Command::SetMetronome(true));
         controller.send(Command::TogglePlay);
         (controller, engine)
@@ -233,8 +422,8 @@ mod tests {
 
     #[test]
     fn the_output_does_not_depend_on_the_buffer_size() {
-        let (_one, mut whole) = metronome_on();
-        let (_other, mut pieces) = metronome_on();
+        let (_one, mut whole) = busy();
+        let (_other, mut pieces) = busy();
         let expected = run(&mut whole, 48_000);
         let actual: Vec<f32> = (0..480).flat_map(|_| run(&mut pieces, 100)).collect();
         assert_eq!(actual, expected);
@@ -242,7 +431,7 @@ mod tests {
 
     #[test]
     fn filling_buffers_never_allocates_memory() {
-        let (mut controller, mut engine) = metronome_on();
+        let (mut controller, mut engine) = busy();
         let mut buffer = vec![0.0; 1_024];
         assert_no_alloc(|| {
             for _ in 0..500 {
@@ -251,17 +440,5 @@ mod tests {
         });
         controller.send(Command::TogglePlay);
         assert_no_alloc(|| engine.process(&mut buffer, 2));
-    }
-
-    #[test]
-    fn continue_plays_from_where_playback_stopped() {
-        let (mut controller, mut engine) = engine();
-        controller.send(Command::TogglePlay);
-        let _ = run(&mut engine, 1_000);
-        controller.send(Command::TogglePlay);
-        let _ = run(&mut engine, 10);
-        controller.send(Command::Continue);
-        let _ = run(&mut engine, 500);
-        assert_eq!(controller.playhead(), 1_500);
     }
 }

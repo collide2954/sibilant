@@ -3,6 +3,7 @@ use std::fmt;
 use sibilant_core::project::Project;
 use sibilant_core::time::{Clock, Position};
 use sibilant_device::{DeviceError, OutputStream};
+use sibilant_engine::arrangement::Arrangement;
 use sibilant_engine::engine::{self, Controller};
 use sibilant_engine::timing::{self, Timing};
 
@@ -53,10 +54,13 @@ impl fmt::Debug for Audio {
     }
 }
 
-fn timing(project: &Project, sample_rate: u32) -> Timing {
-    Timing::new(
-        sample_rate,
-        project.tempo_map().clone(),
-        project.time_signature_map().clone(),
+fn timing(project: &Project, sample_rate: u32) -> Arrangement {
+    Arrangement::new(
+        Timing::new(
+            sample_rate,
+            project.tempo_map().clone(),
+            project.time_signature_map().clone(),
+        ),
+        Vec::new(),
     )
 }

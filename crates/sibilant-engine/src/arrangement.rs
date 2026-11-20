@@ -21,6 +21,35 @@ impl AudioBuffer {
     pub fn frames(&self) -> usize {
         self.channels.first().map_or(0, |channel| channel.len())
     }
+
+    fn frame(&self, index: usize) -> Option<[f32; 2]> {
+        let left = *self.channels.first()?.get(index)?;
+        let right = self
+            .channels
+            .get(1)
+            .and_then(|channel| channel.get(index))
+            .copied()
+            .unwrap_or(left);
+        Some([left, right])
+    }
+}
+
+impl ClipPlayback {
+    pub(crate) fn sample(&self, frame: i64) -> Option<[f32; 2]> {
+        let index = usize::try_from(self.offset + frame - self.start).ok()?;
+        let [left, right] = self.audio.frame(index)?;
+        let gain = self.fade_gain(frame);
+        Some([left * gain, right * gain])
+    }
+
+    fn fade_gain(&self, frame: i64) -> f32 {
+        let edge = (frame - self.start).min(self.end - 1 - frame);
+        if edge >= self.fade {
+            1.0
+        } else {
+            ratio(edge, self.fade)
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -45,11 +74,8 @@ pub struct Arrangement {
 }
 
 impl Arrangement {
-    pub fn new(timing: Timing) -> Self {
-        Self {
-            timing,
-            tracks: Vec::new(),
-        }
+    pub fn new(timing: Timing, tracks: Vec<TrackPlayback>) -> Self {
+        Self { timing, tracks }
     }
 
     pub fn of_project(
@@ -122,6 +148,14 @@ fn clips(
 )]
 fn to_f32(value: f64) -> f32 {
     value as f32
+}
+
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "fade lengths stay far below 2^24 frames"
+)]
+fn ratio(part: i64, whole: i64) -> f32 {
+    part as f32 / whole as f32
 }
 
 #[cfg(test)]
