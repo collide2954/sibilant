@@ -18,6 +18,7 @@ impl Step {
         "-D",
         "warnings",
     ]);
+    pub(crate) const TEST: Self = Self::cargo(&["test", "--workspace"]);
 
     const fn cargo(args: &'static [&'static str]) -> Self {
         Self {

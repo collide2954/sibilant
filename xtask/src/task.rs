@@ -3,10 +3,11 @@ use crate::step::Step;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Task {
     PreCommit,
+    PrePush,
 }
 
 impl Task {
-    const ALL: [Self; 1] = [Self::PreCommit];
+    const ALL: [Self; 2] = [Self::PreCommit, Self::PrePush];
 
     pub(crate) fn from_name(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|task| task.name() == name)
@@ -22,12 +23,14 @@ impl Task {
     pub(crate) fn steps(self) -> &'static [Step] {
         match self {
             Self::PreCommit => &[Step::FORMAT, Step::LINT],
+            Self::PrePush => &[Step::TEST],
         }
     }
 
     fn name(self) -> &'static str {
         match self {
             Self::PreCommit => "pre-commit",
+            Self::PrePush => "pre-push",
         }
     }
 }
@@ -43,6 +46,7 @@ mod tests {
     #[test]
     fn finds_each_task_by_name() {
         assert_eq!(Task::from_name("pre-commit"), Some(Task::PreCommit));
+        assert_eq!(Task::from_name("pre-push"), Some(Task::PrePush));
     }
 
     #[test]
@@ -52,7 +56,7 @@ mod tests {
 
     #[test]
     fn usage_lists_every_task() {
-        assert_eq!(Task::usage(), "usage: cargo xtask <pre-commit>");
+        assert_eq!(Task::usage(), "usage: cargo xtask <pre-commit|pre-push>");
     }
 
     #[test]
@@ -64,5 +68,10 @@ mod tests {
                 "cargo clippy --workspace --all-targets -- -D warnings",
             ]
         );
+    }
+
+    #[test]
+    fn pre_push_runs_the_tests() {
+        assert_eq!(commands(Task::PrePush), ["cargo test --workspace"]);
     }
 }
