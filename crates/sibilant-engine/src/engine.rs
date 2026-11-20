@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use rtrb::{Consumer, Producer, RingBuffer};
 use sibilant_core::time::{Musical, Position};
 
+use crate::click::ClickVoice;
 use crate::timing::Timing;
 
 const QUEUE_CAPACITY: usize = 256;
@@ -11,6 +12,7 @@ const QUEUE_CAPACITY: usize = 256;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
     Continue,
+    SetMetronome(bool),
     TogglePlay,
 }
 
@@ -35,6 +37,8 @@ pub struct Engine {
     marker: Position<Musical>,
     stopped_at: i64,
     playhead: i64,
+    metronome: bool,
+    click: ClickVoice,
 }
 
 pub fn new(timing: Timing) -> (Controller, Engine) {
@@ -47,6 +51,7 @@ pub fn new(timing: Timing) -> (Controller, Engine) {
         commands: producer,
         shared: Arc::clone(&shared),
     };
+    let click = ClickVoice::new(timing.sample_rate());
     let engine = Engine {
         timing,
         commands: consumer,
@@ -55,6 +60,8 @@ pub fn new(timing: Timing) -> (Controller, Engine) {
         marker,
         stopped_at: start,
         playhead: start,
+        metronome: false,
+        click,
     };
     (controller, engine)
 }
@@ -79,8 +86,19 @@ impl Engine {
             self.apply(command);
         }
         output.fill(0.0);
+        let start = self.playhead;
+        let end = start + frames_in(output, channels);
+        let mut clicks = (self.playing && self.metronome).then(|| self.timing.clicks(start, end));
+        let mut next_click = clicks.as_mut().and_then(Iterator::next);
+        for (frame, samples) in (start..).zip(output.chunks_exact_mut(channels)) {
+            while let Some(click) = next_click.filter(|click| click.frame == frame) {
+                self.click.trigger(click.accent);
+                next_click = clicks.as_mut().and_then(Iterator::next);
+            }
+            samples.fill(self.click.next_sample());
+        }
         if self.playing {
-            self.playhead += frames_in(output, channels);
+            self.playhead = end;
         }
         self.shared.playing.store(self.playing, Ordering::Relaxed);
         self.shared.playhead.store(self.playhead, Ordering::Relaxed);
@@ -102,6 +120,7 @@ impl Engine {
                 self.playing = true;
             }
             Command::Continue => {}
+            Command::SetMetronome(on) => self.metronome = on,
         }
     }
 }
@@ -164,6 +183,60 @@ mod tests {
         let _ = run(&mut engine, 100);
         assert!(!controller.is_playing());
         assert_eq!(controller.playhead(), 0);
+    }
+
+    fn left(buffer: &[f32]) -> Vec<f32> {
+        buffer.iter().step_by(2).copied().collect()
+    }
+
+    fn peak(samples: &[f32]) -> f32 {
+        samples
+            .iter()
+            .fold(0.0, |peak, sample| peak.max(sample.abs()))
+    }
+
+    fn metronome_on() -> (Controller, Engine) {
+        let (mut controller, engine) = engine();
+        controller.send(Command::SetMetronome(true));
+        controller.send(Command::TogglePlay);
+        (controller, engine)
+    }
+
+    #[test]
+    fn the_metronome_is_off_at_the_start() {
+        let (mut controller, mut engine) = engine();
+        controller.send(Command::TogglePlay);
+        assert_eq!(peak(&run(&mut engine, 48_000)), 0.0);
+    }
+
+    #[test]
+    fn the_metronome_clicks_on_each_beat_while_it_is_on() {
+        let (_controller, mut engine) = metronome_on();
+        let left = left(&run(&mut engine, 48_000));
+        assert!(peak(&left[..240]) > 0.1);
+        assert_eq!(peak(&left[2_000..24_000]), 0.0);
+        assert!(peak(&left[24_000..24_240]) > 0.1);
+    }
+
+    #[test]
+    fn each_channel_gets_the_same_click() {
+        let (_controller, mut engine) = metronome_on();
+        let buffer = run(&mut engine, 4_800);
+        let (frames, _) = buffer.as_chunks::<2>();
+        assert!(
+            frames
+                .iter()
+                .all(|[left, right]| left.to_bits() == right.to_bits())
+        );
+    }
+
+    #[test]
+    fn the_output_does_not_depend_on_the_buffer_size() {
+        let (_one, mut whole) = metronome_on();
+        let (_other, mut pieces) = metronome_on();
+        let expected = run(&mut whole, 48_000);
+        let actual: Vec<f32> = (0..480).flat_map(|_| run(&mut pieces, 100)).collect();
+        assert_eq!(actual, expected);
     }
 
     #[test]
