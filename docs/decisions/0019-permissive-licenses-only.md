@@ -1,6 +1,6 @@
 # 0019. Accept only dependencies with permissive licenses
 
-- Status: Accepted
+- Status: Accepted, with exceptions in [0026](0026-license-exceptions-for-iced.md)
 - Date: 2026-11-19
 
 ## Context
