@@ -19,3 +19,6 @@ To change a decision, write a new record. Then change the status of the old reco
 | [0002](0002-audio-arranger-first.md) | Make the first milestone an audio arranger |
 | [0003](0003-clap-then-vst3.md) | Host CLAP plugins first, then VST3 |
 | [0004](0004-progressive-disclosure.md) | Use progressive disclosure for all users |
+| [0005](0005-layered-workspace.md) | Use a layered Cargo workspace |
+| [0006](0006-immutable-project-and-snapshot-undo.md) | Use an immutable project and snapshot undo |
+| [0007](0007-cpal-behind-a-device-trait.md) | Use cpal for audio devices behind a Sibilant trait |
