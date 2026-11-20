@@ -22,3 +22,7 @@ To change a decision, write a new record. Then change the status of the old reco
 | [0005](0005-layered-workspace.md) | Use a layered Cargo workspace |
 | [0006](0006-immutable-project-and-snapshot-undo.md) | Use an immutable project and snapshot undo |
 | [0007](0007-cpal-behind-a-device-trait.md) | Use cpal for audio devices behind a Sibilant trait |
+| [0008](0008-project-folder-with-json-manifest.md) | Save projects as a folder with a JSON manifest |
+| [0009](0009-f32-audio-and-f64-time.md) | Use f32 for audio and f64 for time calculations |
+| [0010](0010-integer-time-in-two-domains.md) | Keep time as integers in two domains |
+| [0011](0011-real-time-safe-engine.md) | Make the engine real-time safe and ready for parallel processing |
