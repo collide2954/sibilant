@@ -1,6 +1,6 @@
 # 0021. Use 705,600 ticks for each quarter note and typed time values
 
-- Status: Accepted
+- Status: Accepted, partly replaced by [0022](0022-time-signatures-at-bar-lines.md)
 - Date: 2026-11-19
 
 ## Context

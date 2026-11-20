@@ -36,3 +36,4 @@ To change a decision, write a new record. Then change the status of the old reco
 | [0019](0019-permissive-licenses-only.md) | Accept only dependencies with permissive licenses |
 | [0020](0020-ste-documentation-and-few-comments.md) | Write documentation in ASD-STE100 and keep comments to a minimum |
 | [0021](0021-tick-resolution-and-time-types.md) | Use 705,600 ticks for each quarter note and typed time values |
+| [0022](0022-time-signatures-at-bar-lines.md) | Change time signatures only at bar lines and use the lower number for the beat |
