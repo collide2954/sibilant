@@ -2,10 +2,13 @@ use iced::{Element, Theme};
 use sibilant_core::history::History;
 use sibilant_core::mix::Mix;
 use sibilant_core::project::{EditError, Ids, Project, TrackId};
+use sibilant_engine::engine;
 use sibilant_ui::command::Command;
 use sibilant_ui::theme::Palette;
 use sibilant_ui::timeline::Viewport;
 use sibilant_ui::{shell, track_area};
+
+use crate::audio::Audio;
 
 #[derive(Debug)]
 pub(crate) struct App {
@@ -13,6 +16,8 @@ pub(crate) struct App {
     history: History<Project>,
     ids: Ids,
     viewport: Viewport,
+    audio: Option<Audio>,
+    metronome: bool,
 }
 
 impl Default for App {
@@ -24,11 +29,22 @@ impl Default for App {
             history: History::new(project),
             ids,
             viewport: Viewport::default(),
+            audio: None,
+            metronome: false,
         }
     }
 }
 
 impl App {
+    pub(crate) fn with_audio() -> Self {
+        let mut app = Self::default();
+        match Audio::start(app.history.present()) {
+            Ok(audio) => app.audio = Some(audio),
+            Err(error) => eprintln!("audio output is not available: {error}"),
+        }
+        app
+    }
+
     pub(crate) fn update(&mut self, command: Command) {
         match command {
             Command::AddTrack => {
@@ -53,6 +69,18 @@ impl App {
             Command::ZoomTimeline { steps, anchor } => {
                 self.viewport = self.viewport.zoomed(steps, anchor);
             }
+            Command::PlayOrStop => self.send(engine::Command::TogglePlay),
+            Command::Continue => self.send(engine::Command::Continue),
+            Command::ToggleMetronome => {
+                self.metronome = !self.metronome;
+                self.send(engine::Command::SetMetronome(self.metronome));
+            }
+        }
+    }
+
+    fn send(&mut self, command: engine::Command) {
+        if let Some(audio) = &mut self.audio {
+            audio.controller.send(command);
         }
     }
 
@@ -90,7 +118,10 @@ mod tests {
     use iced_test::simulator;
     use sibilant_core::project::{Project, Track, TrackId};
     use sibilant_core::time::Position;
+    use sibilant_engine::engine::Engine;
     use sibilant_ui::command::Command;
+
+    use crate::audio::Audio;
     use sibilant_ui::theme::Palette;
 
     use crate::app::App;
@@ -137,6 +168,47 @@ mod tests {
         app.update(Command::Undo);
         app.update(Command::AddTrack);
         assert_ne!(project(&app).tracks().last().unwrap().id(), undone);
+    }
+
+    fn with_simulated_audio() -> (App, Engine) {
+        let mut app = App::default();
+        let (audio, engine) = Audio::without_device(app.history.present(), 48_000);
+        app.audio = Some(audio);
+        (app, engine)
+    }
+
+    fn engine_is_playing(app: &App) -> bool {
+        app.audio.as_ref().unwrap().controller.is_playing()
+    }
+
+    #[test]
+    fn play_or_stop_starts_and_stops_the_engine() {
+        let (mut app, mut engine) = with_simulated_audio();
+        app.update(Command::PlayOrStop);
+        engine.process(&mut [0.0; 512], 2);
+        assert!(engine_is_playing(&app));
+        app.update(Command::PlayOrStop);
+        engine.process(&mut [0.0; 512], 2);
+        assert!(!engine_is_playing(&app));
+    }
+
+    #[test]
+    fn the_metronome_button_switches_the_click_of_the_engine() {
+        let (mut app, mut engine) = with_simulated_audio();
+        app.update(Command::ToggleMetronome);
+        app.update(Command::PlayOrStop);
+        let mut buffer = [0.0; 960];
+        engine.process(&mut buffer, 2);
+        assert!(app.metronome);
+        assert!(buffer.iter().any(|sample| sample.abs() > 0.1));
+    }
+
+    #[test]
+    fn transport_commands_without_an_audio_device_change_only_the_buttons() {
+        let mut app = App::default();
+        app.update(Command::PlayOrStop);
+        app.update(Command::ToggleMetronome);
+        assert!(app.metronome);
     }
 
     #[test]

@@ -10,6 +10,8 @@ publish.workspace = true
 [dependencies]
 iced.workspace = true
 sibilant-core.workspace = true
+sibilant-device.workspace = true
+sibilant-engine.workspace = true
 sibilant-ui.workspace = true
 
 [dev-dependencies]

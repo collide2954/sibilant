@@ -28,6 +28,8 @@ iced_test = "0.14.0"
 proptest = { version = "1.12.0", default-features = false, features = ["std"] }
 rtrb = "0.4.1"
 sibilant-core = { path = "crates/sibilant-core" }
+sibilant-device = { path = "crates/sibilant-device" }
+sibilant-engine = { path = "crates/sibilant-engine" }
 sibilant-ui = { path = "crates/sibilant-ui" }
 skrifa = { version = "0.44.0", default-features = false, features = ["std"] }
 

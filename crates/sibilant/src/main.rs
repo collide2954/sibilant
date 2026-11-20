@@ -1,4 +1,5 @@
 mod app;
+mod audio;
 
 use app::App;
 use iced::keyboard;
@@ -8,7 +9,7 @@ use sibilant_ui::{fonts, icons};
 const WINDOW_SIZE: (f32, f32) = (1440.0, 900.0);
 
 fn main() -> iced::Result {
-    let application = iced::application(App::default, App::update, App::view)
+    let application = iced::application(App::with_audio, App::update, App::view)
         .subscription(|_| keyboard::listen().filter_map(Command::from_key_event))
         .title("Sibilant")
         .theme(App::theme)

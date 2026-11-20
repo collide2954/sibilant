@@ -2590,6 +2590,8 @@ dependencies = [
  "iced",
  "iced_test",
  "sibilant-core",
+ "sibilant-device",
+ "sibilant-engine",
  "sibilant-ui",
 ]
 

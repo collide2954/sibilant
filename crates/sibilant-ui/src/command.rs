@@ -1,4 +1,4 @@
-use iced::keyboard::{self, Key, Modifiers};
+use iced::keyboard::{self, Key, Modifiers, key};
 use iced::mouse::ScrollDelta;
 use sibilant_core::project::TrackId;
 
@@ -7,8 +7,11 @@ const WHEEL_LINE: f32 = 48.0;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Command {
     AddTrack,
+    Continue,
+    PlayOrStop,
     Redo,
     ScrollTimeline { pixels: f32 },
+    ToggleMetronome,
     ToggleMute(TrackId),
     ToggleSolo(TrackId),
     Undo,
@@ -48,13 +51,20 @@ impl Command {
     }
 
     pub fn from_shortcut(key: &Key, modifiers: Modifiers) -> Option<Self> {
-        let Key::Character(character) = key else {
-            return None;
-        };
-        if !modifiers.command() {
-            return None;
+        match key {
+            Key::Named(key::Named::Space) if !modifiers.command() => Some(if modifiers.shift() {
+                Self::Continue
+            } else {
+                Self::PlayOrStop
+            }),
+            Key::Character(character) if modifiers.command() => {
+                Self::from_command_character(character, modifiers.shift())
+            }
+            _ => None,
         }
-        let shift = modifiers.shift();
+    }
+
+    fn from_command_character(character: &str, shift: bool) -> Option<Self> {
         match character.to_ascii_lowercase().as_str() {
             "t" if !shift => Some(Self::AddTrack),
             "z" if !shift => Some(Self::Undo),
@@ -103,6 +113,25 @@ mod tests {
     #[test]
     fn cmd_y_is_not_a_shortcut() {
         assert_eq!(press("y", Modifiers::COMMAND), None);
+    }
+
+    fn space(modifiers: Modifiers) -> Option<Command> {
+        Command::from_shortcut(&Key::Named(key::Named::Space), modifiers)
+    }
+
+    #[test]
+    fn space_plays_and_stops() {
+        assert_eq!(space(Modifiers::empty()), Some(Command::PlayOrStop));
+    }
+
+    #[test]
+    fn shift_space_continues_from_where_playback_stopped() {
+        assert_eq!(space(Modifiers::SHIFT), Some(Command::Continue));
+    }
+
+    #[test]
+    fn command_space_is_not_a_transport_shortcut() {
+        assert_eq!(space(Modifiers::COMMAND), None);
     }
 
     #[test]
