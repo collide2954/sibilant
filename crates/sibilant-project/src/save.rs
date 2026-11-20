@@ -34,25 +34,23 @@ impl Copies {
                 .then(|| location.relative(path))
                 .flatten()
         };
-        let kept = self
-            .0
-            .get(original)
-            .filter(|copy| copy.exists())
-            .and_then(|copy| inside(copy));
-        if let Some(file) = inside(original).or(kept) {
+        let kept = self.0.get(original).filter(|copy| copy.exists()).cloned();
+        if let Some(file) = inside(original).or_else(|| kept.as_deref().and_then(inside)) {
             return Ok(file);
         }
-        let name = copy_into(&audio, original)
-            .map_err(|error| SaveError::Copy(display_name(original), error.to_string()))?;
-        self.0.insert(original.to_path_buf(), audio.join(&name));
-        Ok(format!("{AUDIO}/{name}"))
+        let from = kept.as_deref().unwrap_or(original);
+        let name = display_name(original);
+        let copy = copy_into(&audio, from, &name)
+            .map_err(|error| SaveError::Copy(name, error.to_string()))?;
+        self.0.insert(original.to_path_buf(), audio.join(&copy));
+        Ok(format!("{AUDIO}/{copy}"))
     }
 }
 
-fn copy_into(folder: &Path, original: &Path) -> io::Result<String> {
-    let name = free_name(folder, &display_name(original));
+fn copy_into(folder: &Path, from: &Path, name: &str) -> io::Result<String> {
+    let name = free_name(folder, name);
     write_through_temporary(&folder.join(&name), |temporary| {
-        fs::copy(original, temporary).map(drop)
+        fs::copy(from, temporary).map(drop)
     })?;
     Ok(name)
 }
@@ -270,6 +268,18 @@ mod tests {
             fs::read(location.audio().join("Kick.wav")).unwrap(),
             b"kick"
         );
+    }
+
+    #[test]
+    fn a_save_to_a_new_folder_copies_from_the_earlier_copy_when_the_original_is_gone() {
+        let scratch = Scratch::new();
+        let kick = scratch.file("samples/Kick.wav", b"kick");
+        let project = project_with(&[&kick]);
+        let copies = save(&project, &location(&scratch), &Copies::default()).unwrap();
+        fs::remove_file(&kick).unwrap();
+        let other = Location::of_file(scratch.path().join("Other").join("Other.sibilant"));
+        save(&project, &other, &copies).unwrap();
+        assert_eq!(fs::read(other.audio().join("Kick.wav")).unwrap(), b"kick");
     }
 
     #[test]
