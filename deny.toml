@@ -1,5 +1,10 @@
 [advisories]
+unmaintained = "all"
 yanked = "deny"
+ignore = [
+    { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained, with no known vulnerability. The Metal backend of wgpu needs it." },
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser is unmaintained, with no known vulnerability. The text engine of Iced needs it." },
+]
 
 [licenses]
 allow = [

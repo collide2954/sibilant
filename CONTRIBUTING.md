@@ -8,7 +8,7 @@ This document gives the rules for changes to Sibilant. All contributors must obe
 2. Install cargo-deny:
 
    ```sh
-   cargo install cargo-deny --locked
+   cargo install cargo-deny --locked --version 0.22.0
    ```
 
 3. Activate the Git hooks of the repository:
