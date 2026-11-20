@@ -5,22 +5,27 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use rtrb::{Consumer, Producer, RingBuffer};
 use sibilant_core::time::{Musical, Position};
 
-use crate::arrangement::Arrangement;
+use crate::arrangement::{Arrangement, AudioBuffer};
 use crate::click::ClickVoice;
+use crate::preview::PreviewVoice;
 
 const QUEUE_CAPACITY: usize = 256;
 const ARRANGEMENT_CAPACITY: usize = 16;
+const PREVIEW_CAPACITY: usize = 16;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Command {
     Continue,
     SetMetronome(bool),
+    SetPreviewGain(f32),
+    StopPreview,
     TogglePlay,
 }
 
 #[derive(Debug, Default)]
 struct Shared {
     playing: AtomicBool,
+    previewing: AtomicBool,
     playhead: AtomicI64,
 }
 
@@ -29,6 +34,8 @@ pub struct Controller {
     commands: Producer<Command>,
     arrangements: Producer<Box<Arrangement>>,
     released: Consumer<Box<Arrangement>>,
+    previews: Producer<Arc<AudioBuffer>>,
+    released_previews: Consumer<Arc<AudioBuffer>>,
     shared: Arc<Shared>,
 }
 
@@ -38,6 +45,9 @@ pub struct Engine {
     commands: Consumer<Command>,
     arrangements: Consumer<Box<Arrangement>>,
     released: Producer<Box<Arrangement>>,
+    previews: Consumer<Arc<AudioBuffer>>,
+    released_previews: Producer<Arc<AudioBuffer>>,
+    preview: PreviewVoice,
     shared: Arc<Shared>,
     playing: bool,
     marker: Position<Musical>,
@@ -51,6 +61,8 @@ pub fn new(arrangement: Arrangement) -> (Controller, Engine) {
     let (commands, command_queue) = RingBuffer::new(QUEUE_CAPACITY);
     let (arrangements, arrangement_queue) = RingBuffer::new(ARRANGEMENT_CAPACITY);
     let (released_queue, released) = RingBuffer::new(ARRANGEMENT_CAPACITY);
+    let (previews, preview_queue) = RingBuffer::new(PREVIEW_CAPACITY);
+    let (released_preview_queue, released_previews) = RingBuffer::new(PREVIEW_CAPACITY);
     let shared = Arc::new(Shared::default());
     let marker = Position::START;
     let start = arrangement.timing().frame_of(marker);
@@ -59,21 +71,26 @@ pub fn new(arrangement: Arrangement) -> (Controller, Engine) {
         commands,
         arrangements,
         released,
+        previews,
+        released_previews,
         shared: Arc::clone(&shared),
     };
-    let click = ClickVoice::new(arrangement.timing().sample_rate());
+    let sample_rate = arrangement.timing().sample_rate();
     let engine = Engine {
         arrangement: Box::new(arrangement),
         commands: command_queue,
         arrangements: arrangement_queue,
         released: released_queue,
+        previews: preview_queue,
+        released_previews: released_preview_queue,
+        preview: PreviewVoice::new(sample_rate),
         shared,
         playing: false,
         marker,
         stopped_at: start,
         playhead: start,
         metronome: false,
-        click,
+        click: ClickVoice::new(sample_rate),
     };
     (controller, engine)
 }
@@ -91,18 +108,28 @@ impl Controller {
         self.shared.playhead.load(Ordering::Relaxed)
     }
 
+    pub fn is_previewing(&self) -> bool {
+        self.shared.previewing.load(Ordering::Relaxed)
+    }
+
     pub fn replace_arrangement(&mut self, arrangement: Arrangement) -> bool {
         self.arrangements.push(Box::new(arrangement)).is_ok()
     }
 
-    pub fn release_old_arrangements(&mut self) {
+    pub fn preview(&mut self, audio: Arc<AudioBuffer>) -> bool {
+        self.previews.push(audio).is_ok()
+    }
+
+    pub fn release_old(&mut self) {
         while self.released.pop().is_ok() {}
+        while self.released_previews.pop().is_ok() {}
     }
 }
 
 impl Engine {
     pub fn process(&mut self, output: &mut [f32], channels: usize) {
         self.take_new_arrangements();
+        self.take_new_previews();
         while let Ok(command) = self.commands.pop() {
             self.apply(command);
         }
@@ -123,11 +150,31 @@ impl Engine {
             let click = self.click.next_sample();
             add(samples, [click, click]);
         }
+        for samples in output.chunks_exact_mut(channels) {
+            let Some(frame) = self.preview.next_frame() else {
+                break;
+            };
+            add(samples, frame);
+        }
         if self.playing {
             self.playhead = end;
         }
         self.shared.playing.store(self.playing, Ordering::Relaxed);
+        self.shared
+            .previewing
+            .store(self.preview.is_playing(), Ordering::Relaxed);
         self.shared.playhead.store(self.playhead, Ordering::Relaxed);
+    }
+
+    fn take_new_previews(&mut self) {
+        while self.released_previews.slots() > 0 {
+            let Ok(audio) = self.previews.pop() else {
+                break;
+            };
+            if let Some(old) = self.preview.start(audio) {
+                let _ = self.released_previews.push(old);
+            }
+        }
     }
 
     fn take_new_arrangements(&mut self) {
@@ -158,6 +205,8 @@ impl Engine {
             }
             Command::Continue => {}
             Command::SetMetronome(on) => self.metronome = on,
+            Command::SetPreviewGain(gain) => self.preview.set_gain(gain),
+            Command::StopPreview => self.preview.stop(),
         }
     }
 }
@@ -485,7 +534,7 @@ mod tests {
         controller.replace_arrangement(Arrangement::new(timing(), Vec::new()));
         let _ = run(&mut engine, 10);
         assert_eq!(Arc::strong_count(&audio), 2);
-        controller.release_old_arrangements();
+        controller.release_old();
         assert_eq!(Arc::strong_count(&audio), 1);
     }
 
@@ -504,7 +553,7 @@ mod tests {
         );
         assert!(controller.replace_arrangement(with_clip));
         assert_eq!(peak(&run(&mut engine, 100)), 0.0);
-        controller.release_old_arrangements();
+        controller.release_old();
         assert_eq!(left(&run(&mut engine, 100))[50], 0.5);
     }
 
@@ -513,6 +562,65 @@ mod tests {
         let (mut controller, mut engine) = busy();
         let mut buffer = vec![0.0; 1_024];
         controller.replace_arrangement(Arrangement::new(timing(), Vec::new()));
+        assert_no_alloc(|| engine.process(&mut buffer, 2));
+    }
+
+    fn constant(value: f32, frames: usize) -> Arc<AudioBuffer> {
+        Arc::new(AudioBuffer::new(vec![vec![value; frames]]))
+    }
+
+    #[test]
+    fn a_preview_plays_while_the_transport_is_stopped() {
+        let (mut controller, mut engine) = engine();
+        assert!(controller.preview(constant(0.5, 1_000)));
+        assert_eq!(left(&run(&mut engine, 100))[50], 0.5);
+        assert!(controller.is_previewing());
+    }
+
+    #[test]
+    fn a_preview_ends_with_its_audio() {
+        let (mut controller, mut engine) = engine();
+        controller.preview(constant(0.5, 100));
+        let left = left(&run(&mut engine, 200));
+        assert_eq!(left[99], 0.5);
+        assert_eq!(peak(&left[100..]), 0.0);
+        assert!(!controller.is_previewing());
+    }
+
+    #[test]
+    fn the_controller_sets_the_preview_gain_and_stops_the_preview() {
+        let (mut controller, mut engine) = engine();
+        controller.send(Command::SetPreviewGain(0.5));
+        controller.preview(constant(1.0, 10_000));
+        assert_eq!(left(&run(&mut engine, 100))[50], 0.5);
+        controller.send(Command::StopPreview);
+        let left = left(&run(&mut engine, 1_000));
+        assert!(left[0] > 0.0);
+        assert_eq!(peak(&left[192..]), 0.0);
+        assert!(!controller.is_previewing());
+    }
+
+    #[test]
+    fn the_engine_returns_old_previews_for_the_controller_to_release() {
+        let (mut controller, mut engine) = engine();
+        let first = constant(0.5, 1_000);
+        controller.preview(Arc::clone(&first));
+        let _ = run(&mut engine, 10);
+        controller.preview(constant(0.25, 1_000));
+        let _ = run(&mut engine, 10);
+        assert_eq!(Arc::strong_count(&first), 2);
+        controller.release_old();
+        assert_eq!(Arc::strong_count(&first), 1);
+    }
+
+    #[test]
+    fn previews_never_allocate_memory_in_the_engine() {
+        let (mut controller, mut engine) = busy();
+        let mut buffer = vec![0.0; 1_024];
+        controller.preview(constant(0.5, 100_000));
+        assert_no_alloc(|| engine.process(&mut buffer, 2));
+        controller.send(Command::StopPreview);
+        controller.preview(constant(0.25, 100_000));
         assert_no_alloc(|| engine.process(&mut buffer, 2));
     }
 

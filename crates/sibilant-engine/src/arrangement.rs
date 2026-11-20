@@ -22,7 +22,7 @@ impl AudioBuffer {
         self.channels.first().map_or(0, |channel| channel.len())
     }
 
-    fn frame(&self, index: usize) -> Option<[f32; 2]> {
+    pub(crate) fn frame(&self, index: usize) -> Option<[f32; 2]> {
         let left = *self.channels.first()?.get(index)?;
         let right = self
             .channels

@@ -1,6 +1,7 @@
 pub mod arrangement;
 pub mod click;
 pub mod engine;
+mod preview;
 pub mod timing;
 
 #[cfg(test)]

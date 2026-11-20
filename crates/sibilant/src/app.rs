@@ -103,7 +103,7 @@ impl App {
             Message::DragEnded => self.dragging = None,
             Message::Frame => {
                 if let Some(audio) = self.audio.as_mut() {
-                    audio.controller.release_old_arrangements();
+                    audio.controller.release_old();
                 }
                 self.playing = self
                     .audio
@@ -165,7 +165,7 @@ impl App {
             Arrangement::of_project(self.history.present(), audio.sample_rate(), |source| {
                 pool.get(&source).cloned()
             });
-        audio.controller.release_old_arrangements();
+        audio.controller.release_old();
         audio.controller.replace_arrangement(arrangement);
     }
 
