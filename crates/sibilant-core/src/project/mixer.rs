@@ -1,7 +1,19 @@
 use super::{EditError, Project, Track, TrackId};
-use crate::mix::Mix;
+use crate::mix::{Gain, Mix};
 
 impl Project {
+    pub fn master_gain(&self) -> Gain {
+        self.master_gain
+    }
+
+    #[must_use]
+    pub fn with_master_gain(&self, master_gain: Gain) -> Self {
+        Self {
+            master_gain,
+            ..self.clone()
+        }
+    }
+
     pub fn set_mix(&self, track: TrackId, mix: Mix) -> Result<Self, EditError> {
         self.edit_track(track, |track| track.mix = mix)
     }
@@ -79,6 +91,17 @@ mod tests {
     fn a_muted_track_is_not_heard_when_it_is_soloed() {
         let project = project().set_mix(BASS, switches(true, true)).unwrap();
         assert_eq!(heard(&project), []);
+    }
+
+    #[test]
+    fn a_new_project_has_a_master_gain_that_does_not_change_the_audio() {
+        assert_eq!(Project::default().master_gain(), Gain::UNITY);
+    }
+
+    #[test]
+    fn a_project_takes_a_new_master_gain() {
+        let gain = Gain::from_db(-3.0).unwrap();
+        assert_eq!(project().with_master_gain(gain).master_gain(), gain);
     }
 
     #[test]

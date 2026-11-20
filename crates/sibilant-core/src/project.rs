@@ -11,6 +11,7 @@ mod track;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use crate::mix::Gain;
 use crate::time::{TempoMap, TimeSignatureMap};
 
 pub use clip::{Clip, Region};
@@ -27,6 +28,7 @@ pub struct Project {
     sources: Arc<BTreeMap<SourceId, AudioSource>>,
     scenes: Vec<Arc<Scene>>,
     tracks: Vec<Arc<Track>>,
+    master_gain: Gain,
 }
 
 impl Project {
