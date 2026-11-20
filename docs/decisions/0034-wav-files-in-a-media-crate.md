@@ -12,7 +12,7 @@ Sibilant must read audio files, change their sample rate, calculate waveform dat
 - A new crate, `sibilant-media`, reads audio files, changes their sample rate, calculates waveform peaks, and finds the audio files in folders.
 - The first version reads WAV files with `hound` (Apache-2.0). It reads 8-, 16-, 24-, and 32-bit integer samples and 32-bit float samples.
 - Sibilant reads mono and stereo files. For a file with more channels, Sibilant shows an error.
-- The reader gives 32-bit float samples from -1 to 1.
+- The reader changes integer samples to 32-bit float samples from -1 to 1. Float samples do not change.
 - Other formats come later. They use the same function as WAV files.
 
 ## Consequences
