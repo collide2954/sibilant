@@ -33,7 +33,24 @@ pub struct Project {
     master_gain: Gain,
 }
 
+const NEW_TRACKS: usize = 2;
+const NEW_SCENES: usize = 4;
+
 impl Project {
+    pub fn new(ids: &mut Ids) -> Self {
+        let tracks = (0..NEW_TRACKS).fold(Self::default(), |project, _| {
+            let name = project.next_track_name();
+            project
+                .add_track(ids.track(), name)
+                .expect("a new id is never in use")
+        });
+        (1..=NEW_SCENES).fold(tracks, |project, number| {
+            project
+                .add_scene(ids.scene(), format!("Scene {number}"))
+                .expect("a new id is never in use")
+        })
+    }
+
     pub fn tempo_map(&self) -> &TempoMap {
         &self.tempo_map
     }
@@ -61,8 +78,24 @@ impl Project {
 
 #[cfg(test)]
 mod tests {
-    use crate::project::Project;
+    use crate::project::{Ids, Project, Scene, Track, TrackId};
     use crate::time::{Position, Tempo, TempoMap, TimeSignature, TimeSignatureMap};
+
+    #[test]
+    fn a_new_project_has_two_audio_tracks_and_four_scenes() {
+        let project = Project::new(&mut Ids::default());
+        let tracks: Vec<_> = project.tracks().map(Track::name).collect();
+        let scenes: Vec<_> = project.scenes().map(Scene::name).collect();
+        assert_eq!(tracks, ["Audio 1", "Audio 2"]);
+        assert_eq!(scenes, ["Scene 1", "Scene 2", "Scene 3", "Scene 4"]);
+    }
+
+    #[test]
+    fn a_new_project_takes_its_ids_from_the_counter() {
+        let mut ids = Ids::default();
+        let _ = Project::new(&mut ids);
+        assert_eq!(ids.track(), TrackId::new(7));
+    }
 
     #[test]
     fn a_new_project_plays_at_the_default_tempo() {

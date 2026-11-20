@@ -46,6 +46,15 @@ impl Project {
         self.tracks().find(|track| track.id() == id)
     }
 
+    pub fn next_track_name(&self) -> String {
+        let highest = self
+            .tracks()
+            .filter_map(|track| track.name.strip_prefix("Audio ")?.parse::<u64>().ok())
+            .max()
+            .unwrap_or(0);
+        format!("Audio {}", highest + 1)
+    }
+
     pub fn add_track(&self, id: TrackId, name: impl Into<String>) -> Result<Self, EditError> {
         if self.track(id).is_some() {
             return Err(EditError::DuplicateTrack(id));
@@ -220,6 +229,17 @@ mod tests {
             project.move_track(TrackId::new(9), 0),
             Err(EditError::UnknownTrack(TrackId::new(9)))
         );
+    }
+
+    #[test]
+    fn the_first_new_track_is_audio_1() {
+        assert_eq!(Project::default().next_track_name(), "Audio 1");
+    }
+
+    #[test]
+    fn a_new_track_name_takes_the_number_after_the_highest_audio_number() {
+        let project = with_tracks(&["Audio 1", "Audio 5", "Drums", "Audio x"]);
+        assert_eq!(project.next_track_name(), "Audio 6");
     }
 
     fn colors(project: &Project) -> Vec<u8> {
