@@ -12,17 +12,20 @@ const BOTTOM_HEIGHT: f32 = 240.0;
 const DIVIDER: f32 = 1.0;
 const PADDING: f32 = 12.0;
 const TAB_SPACING: f32 = 16.0;
+const ZONE_SPACING: f32 = 8.0;
 const TEXT_SIZE: f32 = 13.0;
 
 pub fn view<'a, Message: 'a>(
     palette: Palette,
     transport: impl Into<Element<'a, Message>>,
+    browser: impl Into<Element<'a, Message>>,
     tracks: impl Into<Element<'a, Message>>,
 ) -> Element<'a, Message> {
     let transport = zone(palette.raised, transport)
         .height(TRANSPORT_HEIGHT)
         .padding(TRANSPORT_PADDING);
-    let browser = zone(palette.surface, label(palette, "Browser")).width(BROWSER_WIDTH);
+    let browser = column![label(palette, "Browser"), browser.into()].spacing(ZONE_SPACING);
+    let browser = zone(palette.surface, browser).width(BROWSER_WIDTH);
     let tracks = container(tracks)
         .width(Length::Fill)
         .height(Length::Fill)
@@ -65,13 +68,18 @@ mod tests {
     use crate::shell;
     use crate::theme::Palette;
 
-    #[test]
-    fn the_window_has_the_five_zones_in_their_places() {
-        let mut ui = simulator(shell::view::<()>(
+    fn shell() -> iced::Element<'static, ()> {
+        shell::view(
             Palette::GRAPHITE,
             text("Transport"),
+            text("Places"),
             text("Tracks"),
-        ));
+        )
+    }
+
+    #[test]
+    fn the_window_has_the_five_zones_in_their_places() {
+        let mut ui = simulator(shell());
         let mut bounds = |label: &str| ui.find(label).unwrap().bounds();
         let transport = bounds("Transport");
         let browser = bounds("Browser");
@@ -84,12 +92,17 @@ mod tests {
     }
 
     #[test]
+    fn the_browser_zone_shows_the_browser_below_its_title() {
+        let mut ui = simulator(shell());
+        let title = ui.find("Browser").unwrap().bounds();
+        let places = ui.find("Places").unwrap().bounds();
+        let tracks = ui.find("Tracks").unwrap().bounds();
+        assert!(title.y < places.y && places.x < tracks.x);
+    }
+
+    #[test]
     fn the_bottom_zone_has_tabs_for_the_mixer_and_the_clip_editor() {
-        let mut ui = simulator(shell::view::<()>(
-            Palette::GRAPHITE,
-            text("Transport"),
-            text("Tracks"),
-        ));
+        let mut ui = simulator(shell());
         let mixer = ui.find("Mixer").unwrap().bounds();
         let editor = ui.find("Clip editor").unwrap().bounds();
         assert!(mixer.x < editor.x);

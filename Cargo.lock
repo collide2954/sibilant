@@ -2697,6 +2697,7 @@ dependencies = [
  "sibilant-core",
  "sibilant-device",
  "sibilant-engine",
+ "sibilant-media",
  "sibilant-ui",
 ]
 

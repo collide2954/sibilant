@@ -1,9 +1,13 @@
-use iced::{Element, Subscription, Theme, keyboard, window};
+use std::path::PathBuf;
+
+use iced::{Element, Subscription, Task, Theme, keyboard, window};
 use sibilant_core::history::History;
 use sibilant_core::mix::Mix;
 use sibilant_core::project::{EditError, Ids, Project, TrackId};
 use sibilant_core::time::Position;
 use sibilant_engine::engine;
+use sibilant_media::{Entry, Place};
+use sibilant_ui::browser::{self, Browser};
 use sibilant_ui::command::Command;
 use sibilant_ui::theme::Palette;
 use sibilant_ui::timeline::{View, Viewport, Waveforms};
@@ -12,9 +16,12 @@ use sibilant_ui::{shell, track_area};
 
 use crate::audio::Audio;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) enum Message {
     Command(Command),
+    Browser(browser::Event),
+    Places(Vec<Place>),
+    Listed(PathBuf, Result<Vec<Entry>, String>),
     Frame,
 }
 
@@ -24,6 +31,7 @@ pub(crate) struct App {
     history: History<Project>,
     ids: Ids,
     viewport: Viewport,
+    browser: Browser,
     waveforms: Waveforms,
     audio: Option<Audio>,
     metronome: bool,
@@ -39,6 +47,7 @@ impl Default for App {
             history: History::new(project),
             ids,
             viewport: Viewport::default(),
+            browser: Browser::default(),
             waveforms: Waveforms::new(),
             audio: None,
             metronome: false,
@@ -48,18 +57,29 @@ impl Default for App {
 }
 
 impl App {
-    pub(crate) fn with_audio() -> Self {
-        let mut app = Self::default();
+    pub(crate) fn with_audio() -> (Self, Task<Message>) {
+        let (mut app, task) = Self::boot();
         match Audio::start(app.history.present()) {
             Ok(audio) => app.audio = Some(audio),
             Err(error) => eprintln!("audio output is not available: {error}"),
         }
-        app
+        (app, task)
     }
 
-    pub(crate) fn update(&mut self, message: Message) {
+    fn boot() -> (Self, Task<Message>) {
+        let places = Task::perform(async { sibilant_media::places() }, Message::Places);
+        (Self::default(), places)
+    }
+
+    pub(crate) fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Command(command) => self.run(command),
+            Message::Browser(event) => return self.browse(&event),
+            Message::Places(places) => {
+                self.browser = Browser::new(places);
+                return self.browse(&browser::Event::Choose(0));
+            }
+            Message::Listed(folder, result) => self.browser.listed(folder, result),
             Message::Frame => {
                 self.playing = self
                     .audio
@@ -67,6 +87,18 @@ impl App {
                     .is_some_and(|audio| audio.controller.is_playing());
             }
         }
+        Task::none()
+    }
+
+    fn browse(&mut self, event: &browser::Event) -> Task<Message> {
+        let Some(folder) = self.browser.update(event) else {
+            return Task::none();
+        };
+        let listed = folder.clone();
+        Task::perform(
+            async move { sibilant_media::list_folder(&folder).map_err(|error| error.to_string()) },
+            move |result| Message::Listed(listed, result),
+        )
     }
 
     pub(crate) fn subscription(&self) -> Subscription<Message> {
@@ -137,14 +169,15 @@ impl App {
             tempo: project.tempo_map().tempo_at(position),
             time_signatures: project.time_signature_map(),
         };
-        let transport = transport::view(display, self.palette);
+        let transport = transport::view(display, self.palette).map(Message::Command);
+        let browser = browser::view(&self.browser, self.palette).map(Message::Browser);
         let timeline = View {
             viewport: self.viewport,
             playhead: position,
             waveforms: &self.waveforms,
         };
-        let tracks = track_area::view(project, timeline, self.palette);
-        shell::view(self.palette, transport, tracks).map(Message::Command)
+        let tracks = track_area::view(project, timeline, self.palette).map(Message::Command);
+        shell::view(self.palette, transport, browser, tracks)
     }
 
     pub(crate) fn theme(&self) -> Theme {
@@ -173,10 +206,14 @@ fn change_mix(
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use iced_test::simulator;
     use sibilant_core::project::{Project, Track, TrackId};
     use sibilant_core::time::Position;
     use sibilant_engine::engine::Engine;
+    use sibilant_media::{Entry, EntryKind, Place};
+    use sibilant_ui::browser;
     use sibilant_ui::command::Command;
 
     use crate::app::Message;
@@ -230,7 +267,55 @@ mod tests {
     }
 
     fn run(app: &mut App, command: Command) {
-        app.update(Message::Command(command));
+        let _ = app.update(Message::Command(command));
+    }
+
+    fn music() -> PathBuf {
+        PathBuf::from("music")
+    }
+
+    fn with_music_place() -> App {
+        let mut app = App::default();
+        let _ = app.update(Message::Places(vec![Place {
+            name: "Music".into(),
+            path: music(),
+        }]));
+        app
+    }
+
+    #[test]
+    fn the_app_looks_for_the_places_of_the_browser_when_it_starts() {
+        assert_eq!(App::boot().1.units(), 1);
+    }
+
+    #[test]
+    fn the_first_place_opens_in_the_background_when_the_places_arrive() {
+        let mut app = App::default();
+        let places = vec![Place {
+            name: "Music".into(),
+            path: music(),
+        }];
+        assert_eq!(app.update(Message::Places(places)).units(), 1);
+        assert!(simulator(app.view()).find("Loading").is_ok());
+    }
+
+    #[test]
+    fn the_browser_shows_the_entries_of_a_listed_folder() {
+        let mut app = with_music_place();
+        let kick = Entry {
+            name: "kick.wav".into(),
+            path: music().join("kick.wav"),
+            kind: EntryKind::Audio,
+        };
+        let _ = app.update(Message::Listed(music(), Ok(vec![kick])));
+        assert!(simulator(app.view()).find("kick.wav").is_ok());
+    }
+
+    #[test]
+    fn a_folder_opens_in_the_background() {
+        let mut app = with_music_place();
+        let toggle = browser::Event::Toggle(music().join("Drums"));
+        assert_eq!(app.update(Message::Browser(toggle)).units(), 1);
     }
 
     #[test]
@@ -238,7 +323,7 @@ mod tests {
         let (mut app, mut engine) = with_simulated_audio();
         run(&mut app, Command::PlayOrStop);
         engine.process(&mut vec![0.0; 96_000], 2);
-        app.update(Message::Frame);
+        let _ = app.update(Message::Frame);
         let mut ui = simulator(app.view());
         assert!(ui.find("1.3.1").is_ok());
         assert!(ui.find("0:01.000").is_ok());
@@ -249,11 +334,11 @@ mod tests {
         let (mut app, mut engine) = with_simulated_audio();
         run(&mut app, Command::PlayOrStop);
         engine.process(&mut [0.0; 512], 2);
-        app.update(Message::Frame);
+        let _ = app.update(Message::Frame);
         assert!(app.playing);
         run(&mut app, Command::PlayOrStop);
         engine.process(&mut [0.0; 512], 2);
-        app.update(Message::Frame);
+        let _ = app.update(Message::Frame);
         assert!(!app.playing);
     }
 
