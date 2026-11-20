@@ -1,16 +1,22 @@
-use super::{EditError, Project, TrackId};
+use super::{EditError, Project, Track, TrackId};
 use crate::mix::Mix;
 
 impl Project {
     pub fn set_mix(&self, track: TrackId, mix: Mix) -> Result<Self, EditError> {
         self.edit_track(track, |track| track.mix = mix)
     }
+
+    pub fn heard_tracks(&self) -> impl Iterator<Item = &Track> {
+        let solo = self.tracks().any(|track| track.mix.solo);
+        self.tracks()
+            .filter(move |track| !track.mix.mute && (track.mix.solo || !solo))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::mix::{Gain, Mix, Pan};
-    use crate::project::{EditError, Project, TrackId};
+    use crate::project::{EditError, Project, Track, TrackId};
 
     const DRUMS: TrackId = TrackId::new(1);
     const BASS: TrackId = TrackId::new(2);
@@ -42,6 +48,37 @@ mod tests {
         let project = project().set_mix(BASS, mix).unwrap();
         assert_eq!(mix_of(&project, BASS), mix);
         assert_eq!(mix_of(&project, DRUMS), Mix::default());
+    }
+
+    fn switches(mute: bool, solo: bool) -> Mix {
+        Mix {
+            mute,
+            solo,
+            ..Mix::default()
+        }
+    }
+
+    fn heard(project: &Project) -> Vec<TrackId> {
+        project.heard_tracks().map(Track::id).collect()
+    }
+
+    #[test]
+    fn without_solo_each_track_that_is_not_muted_is_heard() {
+        assert_eq!(heard(&project()), [DRUMS, BASS]);
+        let project = project().set_mix(DRUMS, switches(true, false)).unwrap();
+        assert_eq!(heard(&project), [BASS]);
+    }
+
+    #[test]
+    fn with_solo_only_the_soloed_tracks_are_heard() {
+        let project = project().set_mix(BASS, switches(false, true)).unwrap();
+        assert_eq!(heard(&project), [BASS]);
+    }
+
+    #[test]
+    fn a_muted_track_is_not_heard_when_it_is_soloed() {
+        let project = project().set_mix(BASS, switches(true, true)).unwrap();
+        assert_eq!(heard(&project), []);
     }
 
     #[test]
