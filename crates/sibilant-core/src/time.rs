@@ -14,4 +14,4 @@ pub use position::Position;
 pub use tempo::{Tempo, TempoOutOfRange};
 pub use tempo_map::TempoMap;
 pub use time_signature::{InvalidTimeSignature, TimeSignature};
-pub use time_signature_map::TimeSignatureMap;
+pub use time_signature_map::{BarBeat, TimeSignatureMap};
