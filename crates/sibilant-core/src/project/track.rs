@@ -117,7 +117,7 @@ impl Project {
         Ok(project)
     }
 
-    fn track_index(&self, id: TrackId) -> Result<usize, EditError> {
+    pub(super) fn track_index(&self, id: TrackId) -> Result<usize, EditError> {
         self.tracks
             .iter()
             .position(|track| track.id() == id)

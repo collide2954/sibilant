@@ -1,5 +1,6 @@
 mod clip;
 mod edit_error;
+mod editing;
 mod id;
 mod launcher;
 mod mixer;
@@ -17,6 +18,7 @@ use crate::time::{TempoMap, TimeSignatureMap};
 
 pub use clip::{Clip, Region};
 pub use edit_error::EditError;
+pub use editing::{ClipKey, Edge, Edited};
 pub use id::{Ids, SceneId, SourceId, TrackId};
 pub use scene::Scene;
 pub use source::AudioSource;

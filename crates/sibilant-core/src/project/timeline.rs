@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use super::{Clip, EditError, Project, Track, TrackId};
-use crate::time::{Duration, Musical, Position, TempoMap};
+use crate::time::{Clock, Duration, Musical, Position, TempoMap};
 
 pub(super) type Lane = BTreeMap<Position<Musical>, Arc<Clip>>;
 
@@ -58,7 +58,7 @@ impl Project {
     }
 }
 
-fn place(lane: &mut Lane, tempo: &TempoMap, start: Position<Musical>, clip: Clip) {
+pub(super) fn place(lane: &mut Lane, tempo: &TempoMap, start: Position<Musical>, clip: Clip) {
     let end = end_of(tempo, start, &clip);
     let remainder = remainder_after(lane, tempo, end);
     lane.retain(|&other, _| other < start || end <= other);
@@ -91,9 +91,12 @@ fn remainder_after(lane: &Lane, tempo: &TempoMap, end: Position<Musical>) -> Opt
 }
 
 fn end_of(tempo: &TempoMap, start: Position<Musical>, clip: &Clip) -> Position<Musical> {
-    let audio_end = tempo.to_clock(start) + clip.region().length;
-    let nearest = tempo.to_musical(audio_end);
-    if tempo.to_clock(nearest) < audio_end {
+    first_tick_from(tempo, tempo.to_clock(start) + clip.region().length)
+}
+
+pub(super) fn first_tick_from(tempo: &TempoMap, clock: Position<Clock>) -> Position<Musical> {
+    let nearest = tempo.to_musical(clock);
+    if tempo.to_clock(nearest) < clock {
         nearest + Duration::from_ticks(1)
     } else {
         nearest

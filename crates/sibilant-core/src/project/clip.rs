@@ -35,6 +35,13 @@ impl Clip {
         self.region
     }
 
+    pub(super) fn with_region(&self, region: Region) -> Self {
+        Self {
+            region,
+            ..self.clone()
+        }
+    }
+
     pub(super) fn part_before(&self, cut: Duration<Clock>) -> Self {
         let region = Region {
             length: cut,
