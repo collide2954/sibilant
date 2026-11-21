@@ -23,6 +23,7 @@ Version 0.1 must let the user arrange clips on the timeline (record 0002). The u
 - Trim: A drag on the left or the right edge of a clip moves that edge. The edge area is 6 pixels wide. The audio stays at its position in time. A clip cannot start before the start of its audio file or end after the end of its audio file.
 - Snap: Moves and trims snap to the grid that the timeline shows. This is the beat when the timeline shows beat lines, and the bar when it does not. When the user holds Alt (Option on macOS) during the drag, the clip does not snap.
 - When a moved or trimmed clip covers other clips, it replaces the parts that it covers. This is the same rule as for a dropped audio file.
+- During a move or a trim, the timeline shows the result before the user releases the mouse button. The Esc key stops the drag, and the clips stay where they were.
 - Shortcuts. On macOS, Cmd replaces Ctrl.
   - Ctrl+E splits each selected clip at the play start. After the split, the two parts are selected.
   - Delete or Backspace removes the selected clips.
