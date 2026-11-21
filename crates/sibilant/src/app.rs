@@ -44,7 +44,7 @@ pub(crate) enum Message {
     Browser(browser::Event),
     Places(Vec<Place>),
     Listed(PathBuf, Result<Vec<Entry>, String>),
-    Loaded(Placement, Result<LoadedAudio, String>),
+    Loaded(DocumentId, Placement, Result<LoadedAudio, String>),
     PreviewLoaded(PathBuf, Result<LoadedAudio, String>),
     SaveAs(Option<PathBuf>),
     Saved(Box<Saving>),
@@ -127,8 +127,9 @@ impl App {
                 return self.browse(&browser::Event::Choose(0));
             }
             Message::Listed(folder, result) => self.browser.listed(folder, result),
-            Message::Loaded(placement, Ok(loaded)) => self.place(placement, loaded),
-            Message::Loaded(_, Err(message)) => self.browser.set_notice(Some(message)),
+            Message::Loaded(document, ..) if document != self.document.id() => {}
+            Message::Loaded(_, placement, Ok(loaded)) => self.place(placement, loaded),
+            Message::Loaded(.., Err(message)) => self.browser.set_notice(Some(message)),
             Message::PreviewLoaded(file, result) => self.preview_loaded(file, result),
             Message::SaveAs(Some(chosen)) => return self.save_to(Target::Chosen(chosen)),
             Message::Saved(saving) => self.finish_saving(*saving),
@@ -161,10 +162,11 @@ impl App {
             self.place(placement, previewed);
             return Task::none();
         }
+        let document = self.document.id();
         let sample_rate = self.audio.as_ref().map(Audio::sample_rate);
         Task::perform(
             async move { library::load(&path, sample_rate) },
-            move |result| Message::Loaded(placement, result),
+            move |result| Message::Loaded(document, placement, result),
         )
     }
 
@@ -647,7 +649,8 @@ mod tests {
 
     fn place(app: &mut App, track: Option<TrackId>, start: Position<Musical>, name: &str) {
         let placement = Placement { track, start };
-        let _ = app.update(Message::Loaded(placement, Ok(loaded(name))));
+        let document = app.document.id();
+        let _ = app.update(Message::Loaded(document, placement, Ok(loaded(name))));
     }
 
     fn kick() -> PathBuf {
@@ -774,12 +777,25 @@ mod tests {
             start: Position::START,
         };
         let failure = Err("kick.wav: not a WAV file".into());
-        let _ = app.update(Message::Loaded(placement, failure));
+        let _ = app.update(Message::Loaded(app.document.id(), placement, failure));
         assert!(
             simulator(app.view())
                 .find("kick.wav: not a WAV file")
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn a_dropped_file_that_loads_after_an_open_stays_out_of_the_opened_project() {
+        let mut app = App::default();
+        let older = app.document.id();
+        let _ = open_my_song(&mut app);
+        let placement = Placement {
+            track: None,
+            start: Position::START,
+        };
+        let _ = app.update(Message::Loaded(older, placement, Ok(loaded("kick"))));
+        assert_eq!(track_names(&app), ["Drums"]);
     }
 
     fn loudest(buffer: &[f32]) -> f32 {
