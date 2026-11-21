@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -12,6 +12,7 @@ use sibilant_core::time::{Duration, Musical, Position};
 use sibilant_engine::arrangement::{Arrangement, AudioBuffer};
 use sibilant_engine::engine;
 use sibilant_media::{Entry, Place};
+use sibilant_project::Opened;
 use sibilant_ui::browser::{self, Browser, Request};
 use sibilant_ui::command::Command;
 use sibilant_ui::theme::Palette;
@@ -27,7 +28,7 @@ mod document;
 mod file;
 mod preview;
 
-use document::Document;
+use document::{Document, DocumentId};
 use file::{Saving, Target};
 use preview::Previews;
 
@@ -47,6 +48,9 @@ pub(crate) enum Message {
     PreviewLoaded(PathBuf, Result<LoadedAudio, String>),
     SaveAs(Option<PathBuf>),
     Saved(Box<Saving>),
+    OpenFrom(Option<PathBuf>),
+    Opened(Box<Result<Opened, String>>),
+    SourceLoaded(DocumentId, SourceId, Result<LoadedAudio, String>),
     DragEnded,
     Frame,
 }
@@ -63,6 +67,7 @@ pub(crate) struct App {
     previews: Previews,
     pool: BTreeMap<SourceId, Arc<AudioBuffer>>,
     waveforms: Waveforms,
+    missing: BTreeSet<String>,
     audio: Option<Audio>,
     metronome: bool,
     playing: bool,
@@ -75,7 +80,7 @@ impl Default for App {
         let project = Project::new(&mut ids);
         Self {
             palette: Palette::default(),
-            document: Document::new(&project),
+            document: Document::new(&project, None),
             history: History::new(project),
             ids,
             viewport: Viewport::default(),
@@ -84,6 +89,7 @@ impl Default for App {
             previews: Previews::default(),
             pool: BTreeMap::new(),
             waveforms: Waveforms::new(),
+            missing: BTreeSet::new(),
             audio: None,
             metronome: false,
             playing: false,
@@ -125,8 +131,13 @@ impl App {
             Message::Loaded(_, Err(message)) => self.browser.set_notice(Some(message)),
             Message::PreviewLoaded(file, result) => self.preview_loaded(file, result),
             Message::SaveAs(Some(chosen)) => return self.save_to(Target::Chosen(chosen)),
-            Message::SaveAs(None) => {}
             Message::Saved(saving) => self.finish_saving(*saving),
+            Message::OpenFrom(Some(file)) => return file::open(file),
+            Message::SaveAs(None) | Message::OpenFrom(None) => {}
+            Message::Opened(result) => return self.finish_opening(*result),
+            Message::SourceLoaded(document, source, result) => {
+                self.source_loaded(document, source, result);
+            }
             Message::DragEnded => self.dragging = None,
             Message::Frame => {
                 if let Some(audio) = self.audio.as_mut() {
@@ -276,6 +287,7 @@ impl App {
                 self.send(engine::Command::SetMetronome(self.metronome));
             }
             Command::Drop { track, start } => return self.import(Placement { track, start }),
+            Command::Open => return dialogs::open_file().map(Message::OpenFrom),
             Command::Save => return self.save(),
             Command::SaveAs => return self.save_as(),
             Command::StopPreview => self.stop_preview(),
@@ -368,16 +380,17 @@ mod tests {
 
     use iced::Task;
     use iced_test::simulator;
-    use sibilant_core::project::{Project, Track, TrackId};
+    use sibilant_core::project::{AudioSource, Clip, Project, Region, SourceId, Track, TrackId};
     use sibilant_core::time::{Duration, Musical, Position};
     use sibilant_engine::arrangement::AudioBuffer;
     use sibilant_engine::engine::Engine;
     use sibilant_media::{Entry, EntryKind, Peaks, Place};
-    use sibilant_project::{Copies, Location};
+    use sibilant_project::{Copies, Location, Opened};
     use sibilant_ui::browser;
     use sibilant_ui::command::Command;
     use sibilant_ui::icons::Icon;
     use sibilant_ui::theme::Palette;
+    use sibilant_ui::timeline::Viewport;
 
     use crate::app::file::{Saved, Saving};
     use crate::app::{App, Message, Placement, release_that_no_track_takes};
@@ -899,8 +912,201 @@ mod tests {
     }
 
     fn finish_saving(app: &mut App, project: Project, result: Result<Saved, String>) {
-        let saving = Saving { project, result };
+        let saving = Saving {
+            document: app.document.id(),
+            project,
+            result,
+        };
         let _ = app.update(Message::Saved(Box::new(saving)));
+    }
+
+    const KICK: SourceId = SourceId::new(5);
+    const PAD: SourceId = SourceId::new(6);
+    const DRUMS: TrackId = TrackId::new(7);
+
+    fn opened_project() -> Project {
+        let second = Duration::from_seconds(1);
+        let source = |id, file: &str| AudioSource::new(id, Path::new("audio").join(file), second);
+        let region = Region {
+            start: Duration::ZERO,
+            length: second,
+        };
+        Project::default()
+            .add_source(source(KICK, "Kick.wav"))
+            .and_then(|project| project.add_source(source(PAD, "Pad.wav")))
+            .and_then(|project| project.add_track(DRUMS, "Drums"))
+            .and_then(|project| {
+                project.place_clip(DRUMS, Position::START, Clip::new("Kick", KICK, region))
+            })
+            .unwrap()
+    }
+
+    fn open_my_song(app: &mut App) -> Task<Message> {
+        let opened = Opened {
+            project: opened_project(),
+            location: Location::of_file(my_song()),
+        };
+        app.update(Message::Opened(Box::new(Ok(opened))))
+    }
+
+    fn load(app: &mut App, source: SourceId, result: Result<LoadedAudio, String>) {
+        let _ = app.update(Message::SourceLoaded(app.document.id(), source, result));
+    }
+
+    #[test]
+    fn open_asks_which_project_to_open() {
+        let mut app = App::default();
+        assert_eq!(app.update(Message::Command(Command::Open)).units(), 1);
+    }
+
+    #[test]
+    fn a_chosen_project_file_opens_in_the_background() {
+        let mut app = App::default();
+        assert_eq!(app.update(Message::OpenFrom(Some(my_song()))).units(), 1);
+    }
+
+    #[test]
+    fn a_closed_open_dialog_opens_nothing() {
+        let mut app = App::default();
+        assert_eq!(app.update(Message::OpenFrom(None)).units(), 0);
+    }
+
+    #[test]
+    fn an_opened_project_replaces_the_project_and_its_history() {
+        let mut app = App::default();
+        run(&mut app, Command::AddTrack);
+        let loads = open_my_song(&mut app);
+        assert_eq!(loads.units(), 2);
+        assert_eq!(track_names(&app), ["Drums"]);
+        assert_eq!(app.title(), "MySong — Sibilant");
+        assert!(!app.history.can_undo());
+    }
+
+    #[test]
+    fn new_ids_come_after_the_ids_of_the_opened_project() {
+        let mut app = App::default();
+        let _ = open_my_song(&mut app);
+        run(&mut app, Command::AddTrack);
+        assert_eq!(project(&app).tracks().last().unwrap().id(), TrackId::new(8));
+    }
+
+    #[test]
+    fn the_audio_of_an_opened_project_plays_when_it_has_loaded() {
+        let (mut app, mut engine) = with_simulated_audio();
+        let _ = open_my_song(&mut app);
+        load(
+            &mut app,
+            KICK,
+            Ok(audio_file(PathBuf::from("Kick.wav"), 48_000)),
+        );
+        run(&mut app, Command::PlayOrStop);
+        assert!(loudest(&render(&mut engine, 480)) > 0.4);
+        assert!(app.waveforms.contains_key(&KICK));
+    }
+
+    #[test]
+    fn audio_that_arrives_for_an_older_project_is_dropped() {
+        let mut app = App::default();
+        let _ = open_my_song(&mut app);
+        let older = app.document.id();
+        let _ = open_my_song(&mut app);
+        let kick = audio_file(PathBuf::from("Kick.wav"), 480);
+        let _ = app.update(Message::SourceLoaded(older, KICK, Ok(kick)));
+        assert!(!app.waveforms.contains_key(&KICK));
+    }
+
+    #[test]
+    fn the_audio_of_the_project_before_does_not_play_in_the_opened_project() {
+        let (mut app, mut engine) = with_simulated_audio();
+        let _ = open_my_song(&mut app);
+        load(
+            &mut app,
+            KICK,
+            Ok(audio_file(PathBuf::from("Kick.wav"), 48_000)),
+        );
+        let _ = open_my_song(&mut app);
+        run(&mut app, Command::PlayOrStop);
+        assert_eq!(loudest(&render(&mut engine, 480)), 0.0);
+        assert!(!app.waveforms.contains_key(&KICK));
+    }
+
+    #[test]
+    fn an_opened_project_shows_its_timeline_from_the_start() {
+        let mut app = App::default();
+        run(&mut app, Command::ScrollTimeline { pixels: 80.0 });
+        let _ = open_my_song(&mut app);
+        assert_eq!(app.viewport, Viewport::default());
+    }
+
+    #[test]
+    fn an_opened_project_removes_the_notice_of_the_project_before() {
+        let mut app = App::default();
+        let _ = app.update(Message::Opened(Box::new(Err("no file".into()))));
+        let _ = open_my_song(&mut app);
+        let notice = "Sibilant did not open the project: no file";
+        assert!(simulator(app.view()).find(notice).is_err());
+    }
+
+    #[test]
+    fn the_notice_names_only_the_missing_files_of_the_opened_project() {
+        let mut app = App::default();
+        let _ = open_my_song(&mut app);
+        load(&mut app, KICK, Err("Kick.wav: cannot open the file".into()));
+        let _ = open_my_song(&mut app);
+        load(&mut app, PAD, Err("Pad.wav: cannot open the file".into()));
+        let notice = "These audio files are missing or damaged: Pad.wav";
+        assert!(simulator(app.view()).find(notice).is_ok());
+    }
+
+    #[test]
+    fn missing_audio_files_are_named_in_the_browser() {
+        let mut app = App::default();
+        let _ = open_my_song(&mut app);
+        load(&mut app, KICK, Err("Kick.wav: cannot open the file".into()));
+        load(&mut app, PAD, Err("Pad.wav: cannot open the file".into()));
+        let notice = "These audio files are missing or damaged: Kick.wav, Pad.wav";
+        assert!(simulator(app.view()).find(notice).is_ok());
+    }
+
+    #[test]
+    fn a_project_that_cannot_be_opened_tells_why() {
+        let mut app = App::default();
+        let failure = Err("the file is not a Sibilant project".into());
+        let _ = app.update(Message::Opened(Box::new(failure)));
+        let notice = "Sibilant did not open the project: the file is not a Sibilant project";
+        assert!(simulator(app.view()).find(notice).is_ok());
+        assert_eq!(track_names(&app), ["Audio 1", "Audio 2"]);
+    }
+
+    #[test]
+    fn opening_a_project_stops_the_playback() {
+        let (mut app, mut engine) = with_simulated_audio();
+        run(&mut app, Command::PlayOrStop);
+        let _ = render(&mut engine, 480);
+        let _ = open_my_song(&mut app);
+        let _ = render(&mut engine, 480);
+        assert!(!engine_is_playing(&app));
+    }
+
+    #[test]
+    fn a_save_that_ends_after_an_open_leaves_the_opened_project_alone() {
+        let mut app = App::default();
+        let present = project(&app).clone();
+        let older = app.document.id();
+        let _ = app.update(Message::SaveAs(Some(PathBuf::from("Other.sibilant"))));
+        let _ = open_my_song(&mut app);
+        let saved = Saved {
+            location: Location::of_file(Path::new("Other").join("Other.sibilant")),
+            copies: Copies::default(),
+        };
+        let saving = Saving {
+            document: older,
+            project: present,
+            result: Ok(saved),
+        };
+        let _ = app.update(Message::Saved(Box::new(saving)));
+        assert_eq!(app.title(), "MySong — Sibilant");
+        assert!(!app.saving);
     }
 
     fn saved_as_my_song(app: &mut App, project: Project) {

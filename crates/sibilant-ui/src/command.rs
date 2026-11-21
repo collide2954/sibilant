@@ -13,6 +13,7 @@ pub enum Command {
         track: Option<TrackId>,
         start: Position<Musical>,
     },
+    Open,
     PlayOrStop,
     Redo,
     Save,
@@ -80,6 +81,7 @@ impl Command {
 
     fn from_command_character(character: &str, shift: bool) -> Option<Self> {
         match character.to_ascii_lowercase().as_str() {
+            "o" if !shift => Some(Self::Open),
             "s" if !shift => Some(Self::Save),
             "s" => Some(Self::SaveAs),
             "t" if !shift => Some(Self::AddTrack),
@@ -117,6 +119,11 @@ mod tests {
         let modifiers = Modifiers::COMMAND | Modifiers::SHIFT;
         assert_eq!(press("z", modifiers), Some(Command::Redo));
         assert_eq!(press("Z", modifiers), Some(Command::Redo));
+    }
+
+    #[test]
+    fn command_o_opens_a_project() {
+        assert_eq!(press("o", Modifiers::COMMAND), Some(Command::Open));
     }
 
     #[test]

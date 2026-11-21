@@ -1,23 +1,41 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use sibilant_core::project::Project;
 use sibilant_project::{Copies, Location};
 
 const UNTITLED: &str = "Untitled";
 const CHANGED: &str = "● ";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DocumentId(u64);
+
+impl DocumentId {
+    fn unique() -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        Self(NEXT.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
 #[derive(Debug)]
 pub(super) struct Document {
+    id: DocumentId,
     location: Option<Location>,
     saved: Project,
     copies: Copies,
 }
 
 impl Document {
-    pub(super) fn new(project: &Project) -> Self {
+    pub(super) fn new(project: &Project, location: Option<Location>) -> Self {
         Self {
-            location: None,
+            id: DocumentId::unique(),
+            location,
             saved: project.clone(),
             copies: Copies::default(),
         }
+    }
+
+    pub(super) fn id(&self) -> DocumentId {
+        self.id
     }
 
     pub(super) fn location(&self) -> Option<&Location> {

@@ -6,6 +6,17 @@ use sibilant_project::EXTENSION;
 
 const FILTER: &str = "Sibilant project";
 
+pub(super) fn open_file() -> Task<Option<PathBuf>> {
+    prepare("Open Project", None).then(|dialog| {
+        Task::future(async move {
+            dialog
+                .pick_file()
+                .await
+                .map(|file| file.path().to_path_buf())
+        })
+    })
+}
+
 pub(super) fn save_file(name: &str) -> Task<Option<PathBuf>> {
     let file_name = format!("{name}.{EXTENSION}");
     prepare("Save Project", Some(file_name)).then(|dialog| {
