@@ -1,12 +1,46 @@
 use std::collections::BTreeSet;
 
-use sibilant_core::project::{ClipKey, Track, TrackId};
+use sibilant_core::project::{ClipKey, EditError, Edited, Project, Track, TrackId};
 use sibilant_core::time::{Musical, Position};
 use sibilant_ui::timeline::{Grip, Marquee, Pointer};
 
 use super::App;
 
 const CLICK: f32 = 4.0;
+
+impl App {
+    pub(super) fn delete_selection(&mut self) {
+        self.edit_selection(|project, clips| {
+            Ok(Edited {
+                project: project.remove_clips(clips)?,
+                clips: Vec::new(),
+            })
+        });
+    }
+
+    pub(super) fn split_selection(&mut self) {
+        let at = self.play_start;
+        self.edit_selection(|project, clips| project.split_clips(clips, at));
+    }
+
+    pub(super) fn duplicate_selection(&mut self) {
+        self.edit_selection(Project::duplicate_clips);
+    }
+
+    fn edit_selection(
+        &mut self,
+        edit: impl FnOnce(&Project, &[ClipKey]) -> Result<Edited, EditError>,
+    ) {
+        let clips: Vec<ClipKey> = self.selection.iter().copied().collect();
+        if let Ok(edited) = edit(self.history.present(), &clips) {
+            if edited.project != *self.history.present() {
+                self.history.commit(edited.project);
+                self.sync();
+            }
+            self.selection = edited.clips.into_iter().collect();
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct Spot {
@@ -390,6 +424,75 @@ mod tests {
         click(&mut app, key(tracks[0], 0), false);
         let _ = app.update(Message::Command(Command::Redo));
         assert_eq!(selected(&app), []);
+    }
+
+    fn run(app: &mut App, command: Command) {
+        let _ = app.update(Message::Command(command));
+    }
+
+    fn starts(app: &App, track: TrackId) -> Vec<i64> {
+        let quarter = Position::from_quarter_notes(1).ticks();
+        app.history
+            .present()
+            .track(track)
+            .unwrap()
+            .timeline()
+            .map(|(start, _)| start.ticks() / quarter)
+            .collect()
+    }
+
+    #[test]
+    fn delete_removes_the_selected_clips_in_one_step() {
+        let (mut app, tracks) = with_clips(&[(0, 0), (0, 4), (1, 4)]);
+        click(&mut app, key(tracks[0], 0), true);
+        click(&mut app, key(tracks[1], 4), true);
+        run(&mut app, Command::Delete);
+        assert_eq!(
+            (starts(&app, tracks[0]), starts(&app, tracks[1])),
+            (vec![4], vec![])
+        );
+        assert_eq!(selected(&app), []);
+        run(&mut app, Command::Undo);
+        assert_eq!(
+            (starts(&app, tracks[0]), starts(&app, tracks[1])),
+            (vec![0, 4], vec![4])
+        );
+    }
+
+    #[test]
+    fn delete_without_a_selection_changes_nothing() {
+        let (mut app, _) = with_clips(&[(0, 0)]);
+        run(&mut app, Command::Delete);
+        assert!(!app.history.can_undo());
+    }
+
+    #[test]
+    fn split_cuts_the_selected_clips_at_the_play_start_and_selects_the_parts() {
+        let (mut app, tracks) = with_clips(&[(0, 0)]);
+        run(&mut app, Command::Locate(Position::from_quarter_notes(1)));
+        click(&mut app, key(tracks[0], 0), false);
+        run(&mut app, Command::Split);
+        assert_eq!(starts(&app, tracks[0]), [0, 1]);
+        assert_eq!(selected(&app), [key(tracks[0], 0), key(tracks[0], 1)]);
+    }
+
+    #[test]
+    fn split_without_a_selected_clip_at_the_play_start_changes_nothing() {
+        let (mut app, tracks) = with_clips(&[(0, 0)]);
+        run(&mut app, Command::Locate(Position::from_quarter_notes(8)));
+        click(&mut app, key(tracks[0], 0), false);
+        run(&mut app, Command::Split);
+        assert!(!app.history.can_undo());
+        assert_eq!(selected(&app), [key(tracks[0], 0)]);
+    }
+
+    #[test]
+    fn duplicate_puts_copies_after_the_selection_and_selects_them() {
+        let (mut app, tracks) = with_clips(&[(0, 0)]);
+        click(&mut app, key(tracks[0], 0), false);
+        run(&mut app, Command::Duplicate);
+        assert_eq!(starts(&app, tracks[0]), [0, 2]);
+        assert_eq!(selected(&app), [key(tracks[0], 2)]);
     }
 
     #[test]

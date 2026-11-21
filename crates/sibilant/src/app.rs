@@ -371,6 +371,9 @@ impl App {
             Command::Cancel if self.overlay == Some(Overlay::FileMenu) => self.overlay = None,
             Command::Locate(position) => self.locate(position),
             Command::Pointer(pointer) => self.point(pointer),
+            Command::Delete => self.delete_selection(),
+            Command::Split => self.split_selection(),
+            Command::Duplicate => self.duplicate_selection(),
             Command::Cancel => {
                 self.gesture = None;
                 self.selection.clear();

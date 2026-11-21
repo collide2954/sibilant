@@ -13,10 +13,12 @@ pub enum Command {
     Cancel,
     Confirm,
     Continue,
+    Delete,
     Drop {
         track: Option<TrackId>,
         start: Position<Musical>,
     },
+    Duplicate,
     Locate(Position<Musical>),
     New,
     Open,
@@ -25,6 +27,7 @@ pub enum Command {
     Redo,
     Save,
     SaveAs,
+    Split,
     ScrollTimeline {
         pixels: f32,
     },
@@ -82,12 +85,15 @@ impl Command {
             }
             Key::Named(key::Named::Escape) => Some(Self::Cancel),
             Key::Named(key::Named::Enter) => Some(Self::Confirm),
+            Key::Named(key::Named::Delete | key::Named::Backspace) => Some(Self::Delete),
             _ => None,
         }
     }
 
     fn from_command_character(character: &str, shift: bool) -> Option<Self> {
         match character.to_ascii_lowercase().as_str() {
+            "d" if !shift => Some(Self::Duplicate),
+            "e" if !shift => Some(Self::Split),
             "n" if !shift => Some(Self::New),
             "o" if !shift => Some(Self::Open),
             "s" if !shift => Some(Self::Save),
@@ -127,6 +133,23 @@ mod tests {
         let modifiers = Modifiers::COMMAND | Modifiers::SHIFT;
         assert_eq!(press("z", modifiers), Some(Command::Redo));
         assert_eq!(press("Z", modifiers), Some(Command::Redo));
+    }
+
+    #[test]
+    fn delete_and_backspace_delete_the_selection() {
+        for named in [key::Named::Delete, key::Named::Backspace] {
+            assert_eq!(
+                Command::from_shortcut(&Key::Named(named), Modifiers::empty()),
+                Some(Command::Delete),
+                "{named:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn command_e_splits_and_command_d_duplicates() {
+        assert_eq!(press("e", Modifiers::COMMAND), Some(Command::Split));
+        assert_eq!(press("d", Modifiers::COMMAND), Some(Command::Duplicate));
     }
 
     #[test]
