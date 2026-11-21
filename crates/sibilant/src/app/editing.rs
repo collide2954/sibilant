@@ -44,7 +44,7 @@ impl App {
         }
     }
 
-    fn commit(&mut self, preview: Preview) {
+    pub(super) fn commit(&mut self, preview: Preview) {
         if preview.project != *self.history.present() {
             self.history.commit(preview.project);
             self.sync();
@@ -57,6 +57,12 @@ impl App {
 pub(super) struct Preview {
     project: Project,
     selection: BTreeSet<ClipKey>,
+}
+
+impl Preview {
+    pub(super) fn new(project: Project, selection: BTreeSet<ClipKey>) -> Self {
+        Self { project, selection }
+    }
 }
 
 impl From<Edited> for Preview {

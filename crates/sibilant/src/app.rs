@@ -32,6 +32,7 @@ mod dialogs;
 mod document;
 mod editing;
 mod file;
+mod mixing;
 mod preview;
 mod restore;
 #[cfg(test)]
@@ -264,16 +265,17 @@ impl App {
     }
 
     fn sync(&mut self) {
-        let Some(audio) = self.audio.as_mut() else {
+        let Some(sample_rate) = self.audio.as_ref().map(Audio::sample_rate) else {
             return;
         };
         let pool = &self.pool;
-        let arrangement =
-            Arrangement::of_project(self.history.present(), audio.sample_rate(), |source| {
-                pool.get(&source).cloned()
-            });
-        audio.controller.release_old();
-        audio.controller.replace_arrangement(arrangement);
+        let arrangement = Arrangement::of_project(self.shown().0, sample_rate, |source| {
+            pool.get(&source).cloned()
+        });
+        if let Some(audio) = self.audio.as_mut() {
+            audio.controller.release_old();
+            audio.controller.replace_arrangement(arrangement);
+        }
     }
 
     fn browse(&mut self, event: &browser::Event) -> Task<Message> {
@@ -381,11 +383,14 @@ impl App {
             Command::Duplicate => self.duplicate_selection(),
             Command::Cancel => {
                 self.gesture = None;
-                self.preview = None;
                 self.selection.clear();
                 self.stop_preview();
+                if self.preview.take().is_some() {
+                    self.sync();
+                }
             }
-            Command::Confirm | Command::Mix(_) => {}
+            Command::Mix(mixing) => self.mix(mixing),
+            Command::Confirm => {}
         }
         Task::none()
     }
@@ -534,6 +539,7 @@ mod tests {
     use sibilant_ui::dialog::Choice;
     use sibilant_ui::icons::Icon;
     use sibilant_ui::menu;
+    use sibilant_ui::mixer::{Channel, Mixing};
     use sibilant_ui::theme::Palette;
     use sibilant_ui::timeline::Viewport;
 
@@ -949,6 +955,20 @@ mod tests {
         buffer
             .iter()
             .fold(0.0, |loudest, sample| loudest.max(sample.abs()))
+    }
+
+    #[test]
+    fn the_engine_hears_a_fader_while_it_is_dragged_and_after_escape() {
+        let (mut app, mut engine) = with_simulated_audio();
+        let track = first_track(&app).id();
+        place(&mut app, Some(track), Position::START, "kick");
+        run(&mut app, Command::PlayOrStop);
+        assert!(loudest(&render(&mut engine, 480)) > 0.4);
+        let silence = Mixing::Gain(Channel::Master, f64::NEG_INFINITY);
+        run(&mut app, Command::Mix(silence));
+        assert_eq!(loudest(&render(&mut engine, 480)), 0.0);
+        run(&mut app, Command::Cancel);
+        assert!(loudest(&render(&mut engine, 480)) > 0.4);
     }
 
     #[test]
