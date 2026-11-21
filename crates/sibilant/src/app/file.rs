@@ -84,7 +84,7 @@ impl App {
         )
     }
 
-    pub(super) fn finish_saving(&mut self, saving: Saving) {
+    pub(super) fn finish_saving(&mut self, saving: Saving) -> Task<Message> {
         self.saving = false;
         match saving.result {
             Ok(saved) if saving.document == self.document.id() => {
@@ -92,10 +92,13 @@ impl App {
                     .saved(saving.project, saved.location, saved.copies);
             }
             Ok(_) => {}
-            Err(error) => self
-                .browser
-                .set_notice(Some(format!("Sibilant did not save the project: {error}"))),
+            Err(error) => {
+                self.waiting = None;
+                self.browser
+                    .set_notice(Some(format!("Sibilant did not save the project: {error}")));
+            }
         }
+        self.resume_leaving()
     }
 
     pub(super) fn finish_opening(&mut self, result: Result<Opened, String>) -> Task<Message> {

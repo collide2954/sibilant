@@ -9,6 +9,7 @@ const WHEEL_LINE: f32 = 48.0;
 pub enum Command {
     AddTrack,
     Cancel,
+    Confirm,
     Continue,
     Drop {
         track: Option<TrackId>,
@@ -76,6 +77,7 @@ impl Command {
                 Self::from_command_character(character, modifiers.shift())
             }
             Key::Named(key::Named::Escape) => Some(Self::Cancel),
+            Key::Named(key::Named::Enter) => Some(Self::Confirm),
             _ => None,
         }
     }
@@ -170,6 +172,15 @@ mod tests {
     #[test]
     fn command_space_is_not_a_transport_shortcut() {
         assert_eq!(space(Modifiers::COMMAND), None);
+    }
+
+    #[test]
+    fn enter_confirms() {
+        let enter = Key::Named(key::Named::Enter);
+        assert_eq!(
+            Command::from_shortcut(&enter, Modifiers::empty()),
+            Some(Command::Confirm)
+        );
     }
 
     #[test]

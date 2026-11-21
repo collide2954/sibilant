@@ -10,6 +10,7 @@ const WINDOW_SIZE: (f32, f32) = (1440.0, 900.0);
 fn main() -> iced::Result {
     let application = iced::application(App::with_audio, App::update, App::view)
         .subscription(App::subscription)
+        .exit_on_close_request(false)
         .title(App::title)
         .theme(App::theme)
         .default_font(fonts::TEXT)

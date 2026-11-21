@@ -15,6 +15,7 @@ use sibilant_media::{Entry, Place};
 use sibilant_project::Opened;
 use sibilant_ui::browser::{self, Browser, Request};
 use sibilant_ui::command::Command;
+use sibilant_ui::dialog::{self, Choice};
 use sibilant_ui::theme::Palette;
 use sibilant_ui::timeline::{View, Viewport, Waveforms};
 use sibilant_ui::transport::{self, Display};
@@ -27,10 +28,12 @@ mod dialogs;
 mod document;
 mod file;
 mod preview;
+mod unsaved;
 
 use document::{Document, DocumentId};
 use file::{Saving, Target};
 use preview::Previews;
+use unsaved::Leave;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Placement {
@@ -51,6 +54,8 @@ pub(crate) enum Message {
     OpenFrom(Option<PathBuf>),
     Opened(Box<Result<Opened, String>>),
     SourceLoaded(DocumentId, SourceId, Result<LoadedAudio, String>),
+    Unsaved(Choice),
+    CloseRequested(window::Id),
     DragEnded,
     Frame,
 }
@@ -72,6 +77,8 @@ pub(crate) struct App {
     metronome: bool,
     playing: bool,
     saving: bool,
+    asking: Option<Leave>,
+    waiting: Option<Leave>,
 }
 
 impl Default for App {
@@ -94,6 +101,8 @@ impl Default for App {
             metronome: false,
             playing: false,
             saving: false,
+            asking: None,
+            waiting: None,
         }
     }
 }
@@ -132,13 +141,16 @@ impl App {
             Message::Loaded(.., Err(message)) => self.browser.set_notice(Some(message)),
             Message::PreviewLoaded(file, result) => self.preview_loaded(file, result),
             Message::SaveAs(Some(chosen)) => return self.save_to(Target::Chosen(chosen)),
-            Message::Saved(saving) => self.finish_saving(*saving),
+            Message::SaveAs(None) => self.waiting = None,
+            Message::Saved(saving) => return self.finish_saving(*saving),
             Message::OpenFrom(Some(file)) => return file::open(file),
-            Message::SaveAs(None) | Message::OpenFrom(None) => {}
+            Message::OpenFrom(None) => {}
             Message::Opened(result) => return self.finish_opening(*result),
             Message::SourceLoaded(document, source, result) => {
                 self.source_loaded(document, source, result);
             }
+            Message::Unsaved(choice) => return self.answer(choice),
+            Message::CloseRequested(window) => return self.leave(Leave::Close(window)),
             Message::DragEnded => self.dragging = None,
             Message::Frame => {
                 if let Some(audio) = self.audio.as_mut() {
@@ -253,10 +265,18 @@ impl App {
             .dragging
             .is_some()
             .then(|| event::listen_with(release_that_no_track_takes));
-        Subscription::batch([Some(shortcuts), frames, drag_end].into_iter().flatten())
+        let close_requests = window::close_requests().map(Message::CloseRequested);
+        Subscription::batch(
+            [Some(shortcuts), Some(close_requests), frames, drag_end]
+                .into_iter()
+                .flatten(),
+        )
     }
 
     fn run(&mut self, command: Command) -> Task<Message> {
+        if self.asking.is_some() {
+            return self.answer_by_key(command);
+        }
         match command {
             Command::AddTrack => {
                 let id = self.ids.track();
@@ -289,11 +309,12 @@ impl App {
                 self.send(engine::Command::SetMetronome(self.metronome));
             }
             Command::Drop { track, start } => return self.import(Placement { track, start }),
-            Command::New => self.start_new_project(),
-            Command::Open => return dialogs::open_file().map(Message::OpenFrom),
+            Command::New => return self.leave(Leave::New),
+            Command::Open => return self.leave(Leave::Open),
             Command::Save => return self.save(),
             Command::SaveAs => return self.save_as(),
             Command::Cancel => self.stop_preview(),
+            Command::Confirm => {}
         }
         Task::none()
     }
@@ -331,7 +352,13 @@ impl App {
             dragging: self.dragging.is_some(),
         };
         let tracks = track_area::view(project, timeline, self.palette).map(Message::Command);
-        shell::view(self.palette, transport, browser, tracks)
+        let window = shell::view(self.palette, transport, browser, tracks);
+        if self.asking.is_none() {
+            return window;
+        }
+        let question =
+            dialog::unsaved_changes(&self.document.name(), self.palette).map(Message::Unsaved);
+        dialog::modal(window, question, self.palette)
     }
 
     pub(crate) fn title(&self) -> String {
@@ -391,6 +418,7 @@ mod tests {
     use sibilant_project::{Copies, Location, Opened};
     use sibilant_ui::browser;
     use sibilant_ui::command::Command;
+    use sibilant_ui::dialog::Choice;
     use sibilant_ui::icons::Icon;
     use sibilant_ui::theme::Palette;
     use sibilant_ui::timeline::Viewport;
@@ -928,13 +956,17 @@ mod tests {
             .join("MySong.sibilant")
     }
 
-    fn finish_saving(app: &mut App, project: Project, result: Result<Saved, String>) {
+    fn finish_saving(
+        app: &mut App,
+        project: Project,
+        result: Result<Saved, String>,
+    ) -> Task<Message> {
         let saving = Saving {
             document: app.document.id(),
             project,
             result,
         };
-        let _ = app.update(Message::Saved(Box::new(saving)));
+        app.update(Message::Saved(Box::new(saving)))
     }
 
     const KICK: SourceId = SourceId::new(5);
@@ -1126,12 +1158,169 @@ mod tests {
         assert!(!app.saving);
     }
 
-    fn saved_as_my_song(app: &mut App, project: Project) {
-        let saved = Saved {
+    fn my_song_saved() -> Saved {
+        Saved {
             location: Location::of_file(my_song()),
             copies: Copies::default(),
-        };
-        finish_saving(app, project, Ok(saved));
+        }
+    }
+
+    fn saved_as_my_song(app: &mut App, project: Project) {
+        let _ = finish_saving(app, project, Ok(my_song_saved()));
+    }
+
+    fn asks_to_save(app: &App, name: &str) -> bool {
+        let question = format!("Do you want to save the changes to “{name}”?");
+        simulator(app.view()).find(question.as_str()).is_ok()
+    }
+
+    fn with_unsaved_changes() -> App {
+        let mut app = App::default();
+        run(&mut app, Command::AddTrack);
+        app
+    }
+
+    fn answer(app: &mut App, choice: Choice) -> Task<Message> {
+        app.update(Message::Unsaved(choice))
+    }
+
+    #[test]
+    fn new_with_unsaved_changes_asks_to_save_them_first() {
+        let mut app = with_unsaved_changes();
+        run(&mut app, Command::New);
+        assert!(asks_to_save(&app, "Untitled"));
+        assert_eq!(track_names(&app).len(), 3);
+    }
+
+    #[test]
+    fn open_with_unsaved_changes_asks_to_save_them_first() {
+        let mut app = with_unsaved_changes();
+        assert_eq!(app.update(Message::Command(Command::Open)).units(), 0);
+        assert!(asks_to_save(&app, "Untitled"));
+    }
+
+    #[test]
+    fn a_close_request_without_unsaved_changes_closes_the_window() {
+        let mut app = App::default();
+        let close = Message::CloseRequested(iced::window::Id::unique());
+        assert_eq!(app.update(close).units(), 1);
+    }
+
+    #[test]
+    fn a_close_request_with_unsaved_changes_asks_to_save_them_first() {
+        let mut app = with_unsaved_changes();
+        let close = Message::CloseRequested(iced::window::Id::unique());
+        assert_eq!(app.update(close).units(), 0);
+        assert!(asks_to_save(&app, "Untitled"));
+        assert_eq!(answer(&mut app, Choice::DontSave).units(), 1);
+    }
+
+    #[test]
+    fn dont_save_goes_on_without_a_save() {
+        let mut app = with_unsaved_changes();
+        run(&mut app, Command::New);
+        let _ = answer(&mut app, Choice::DontSave);
+        assert_eq!(track_names(&app).len(), 2);
+        assert!(!asks_to_save(&app, "Untitled"));
+        assert!(!app.saving);
+    }
+
+    #[test]
+    fn cancel_keeps_the_project_and_its_changes() {
+        let mut app = with_unsaved_changes();
+        run(&mut app, Command::New);
+        let _ = answer(&mut app, Choice::Cancel);
+        assert_eq!(track_names(&app).len(), 3);
+        assert!(!asks_to_save(&app, "Untitled"));
+        assert_eq!(app.title(), "● Untitled — Sibilant");
+    }
+
+    #[test]
+    fn save_saves_the_project_and_then_goes_on() {
+        let mut app = App::default();
+        let _ = open_my_song(&mut app);
+        run(&mut app, Command::AddTrack);
+        run(&mut app, Command::New);
+        assert!(asks_to_save(&app, "MySong"));
+        assert_eq!(answer(&mut app, Choice::Save).units(), 1);
+        assert!(app.saving);
+        let present = project(&app).clone();
+        saved_as_my_song(&mut app, present);
+        assert_eq!(track_names(&app), ["Audio 1", "Audio 2"]);
+    }
+
+    #[test]
+    fn save_of_an_untitled_project_asks_where_and_then_goes_on() {
+        let mut app = with_unsaved_changes();
+        run(&mut app, Command::Open);
+        assert_eq!(answer(&mut app, Choice::Save).units(), 1);
+        assert!(!app.saving);
+        let _ = app.update(Message::SaveAs(Some(my_song())));
+        let present = project(&app).clone();
+        let open_dialog = finish_saving(&mut app, present, Ok(my_song_saved()));
+        assert_eq!(open_dialog.units(), 1);
+    }
+
+    #[test]
+    fn a_failed_save_stays_in_the_project() {
+        let mut app = App::default();
+        let _ = open_my_song(&mut app);
+        run(&mut app, Command::AddTrack);
+        run(&mut app, Command::New);
+        let _ = answer(&mut app, Choice::Save);
+        let present = project(&app).clone();
+        let _ = finish_saving(&mut app, present.clone(), Err("disk full".into()));
+        assert_eq!(track_names(&app)[0], "Drums");
+        assert!(!asks_to_save(&app, "MySong"));
+        let _ = app.update(Message::Command(Command::Save));
+        saved_as_my_song(&mut app, present);
+        assert_eq!(track_names(&app)[0], "Drums");
+    }
+
+    #[test]
+    fn a_closed_save_dialog_stays_in_the_project() {
+        let mut app = with_unsaved_changes();
+        run(&mut app, Command::New);
+        let _ = answer(&mut app, Choice::Save);
+        let _ = app.update(Message::SaveAs(None));
+        let _ = app.update(Message::SaveAs(Some(my_song())));
+        let present = project(&app).clone();
+        saved_as_my_song(&mut app, present);
+        assert_eq!(track_names(&app).len(), 3);
+    }
+
+    #[test]
+    fn shortcuts_do_nothing_while_the_dialog_asks() {
+        let mut app = with_unsaved_changes();
+        run(&mut app, Command::New);
+        run(&mut app, Command::AddTrack);
+        run(&mut app, Command::Undo);
+        assert_eq!(track_names(&app).len(), 3);
+        assert!(asks_to_save(&app, "Untitled"));
+    }
+
+    #[test]
+    fn escape_cancels_the_dialog_and_enter_saves() {
+        let mut app = with_unsaved_changes();
+        run(&mut app, Command::New);
+        run(&mut app, Command::Cancel);
+        assert!(!asks_to_save(&app, "Untitled"));
+        run(&mut app, Command::New);
+        let save_dialog = app.update(Message::Command(Command::Confirm));
+        assert_eq!(save_dialog.units(), 1);
+        assert!(!asks_to_save(&app, "Untitled"));
+    }
+
+    #[test]
+    fn new_open_and_close_wait_for_a_save_to_end() {
+        let mut app = App::default();
+        let _ = open_my_song(&mut app);
+        let _ = app.update(Message::Command(Command::Save));
+        assert_eq!(app.update(Message::Command(Command::New)).units(), 0);
+        assert_eq!(track_names(&app), ["Drums"]);
+        let present = project(&app).clone();
+        saved_as_my_song(&mut app, present);
+        assert_eq!(track_names(&app), ["Audio 1", "Audio 2"]);
     }
 
     #[test]
@@ -1217,7 +1406,7 @@ mod tests {
         let mut app = App::default();
         let present = project(&app).clone();
         let _ = app.update(Message::SaveAs(Some(my_song())));
-        finish_saving(
+        let _ = finish_saving(
             &mut app,
             present,
             Err("cannot write the project file".into()),
