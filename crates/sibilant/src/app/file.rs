@@ -168,6 +168,7 @@ impl App {
         self.missing.clear();
         self.selection.clear();
         self.gesture = None;
+        self.preview = None;
         self.browser.set_notice(None);
         self.send(engine::Command::Stop);
         self.locate(Position::START);

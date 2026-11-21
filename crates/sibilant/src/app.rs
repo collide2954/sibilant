@@ -40,7 +40,7 @@ mod unsaved;
 
 use autosave::{Copying, Recovery};
 use document::{Document, DocumentId};
-use editing::Gesture;
+use editing::{Gesture, Preview};
 use file::{Saving, Target};
 use preview::Previews;
 use unsaved::Leave;
@@ -98,6 +98,7 @@ pub(crate) struct App {
     waiting: Option<Leave>,
     selection: BTreeSet<ClipKey>,
     gesture: Option<Gesture>,
+    preview: Option<Preview>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -140,6 +141,7 @@ impl Default for App {
             waiting: None,
             selection: BTreeSet::new(),
             gesture: None,
+            preview: None,
         }
     }
 }
@@ -376,6 +378,7 @@ impl App {
             Command::Duplicate => self.duplicate_selection(),
             Command::Cancel => {
                 self.gesture = None;
+                self.preview = None;
                 self.selection.clear();
                 self.stop_preview();
             }
@@ -421,7 +424,7 @@ impl App {
             play_start: self.play_start,
             waveforms: &self.waveforms,
             dragging: self.dragging.is_some(),
-            selection: &self.selection,
+            selection: self.shown().1,
             marquee: self.marquee(),
             pointing: self.gesture.is_some(),
         }
@@ -442,7 +445,7 @@ impl App {
         let transport = transport::view(display, self.palette).map(Message::Command);
         let browser = browser::view(&self.browser, self.palette).map(Message::Browser);
         let timeline = self.timeline_view(position);
-        let tracks = track_area::view(project, timeline, self.palette).map(Message::Command);
+        let tracks = track_area::view(self.shown().0, timeline, self.palette).map(Message::Command);
         let open = self.overlay == Some(Overlay::FileMenu);
         let file = menu::file_button(open, self.palette).map(Message::Menu);
         let window = shell::view(self.palette, file, transport, browser, tracks);

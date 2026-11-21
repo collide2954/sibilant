@@ -27,17 +27,43 @@ impl App {
         self.edit_selection(Project::duplicate_clips);
     }
 
+    pub(super) fn shown(&self) -> (&Project, &BTreeSet<ClipKey>) {
+        match &self.preview {
+            Some(preview) => (&preview.project, &preview.selection),
+            None => (self.history.present(), &self.selection),
+        }
+    }
+
     fn edit_selection(
         &mut self,
         edit: impl FnOnce(&Project, &[ClipKey]) -> Result<Edited, EditError>,
     ) {
         let clips: Vec<ClipKey> = self.selection.iter().copied().collect();
         if let Ok(edited) = edit(self.history.present(), &clips) {
-            if edited.project != *self.history.present() {
-                self.history.commit(edited.project);
-                self.sync();
-            }
-            self.selection = edited.clips.into_iter().collect();
+            self.commit(Preview::from(edited));
+        }
+    }
+
+    fn commit(&mut self, preview: Preview) {
+        if preview.project != *self.history.present() {
+            self.history.commit(preview.project);
+            self.sync();
+        }
+        self.selection = preview.selection;
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct Preview {
+    project: Project,
+    selection: BTreeSet<ClipKey>,
+}
+
+impl From<Edited> for Preview {
+    fn from(edited: Edited) -> Self {
+        Self {
+            project: edited.project,
+            selection: edited.clips.into_iter().collect(),
         }
     }
 }
@@ -89,12 +115,18 @@ impl App {
             }
             Some(Gesture::Grab {
                 clip,
-                grip: Grip::Body,
+                grip,
                 from,
                 to,
                 ..
-            }) if !self.moved(from, to) => self.selection = BTreeSet::from([clip]),
-            Some(Gesture::Grab { .. }) | None => {}
+            }) => match self.preview.take() {
+                Some(preview) => self.commit(preview),
+                None if grip == Grip::Body && !self.moved(from, to) => {
+                    self.selection = BTreeSet::from([clip]);
+                }
+                None => {}
+            },
+            None => {}
         }
     }
 
@@ -149,6 +181,49 @@ impl App {
             }
             None => {}
         }
+        self.preview = self.grabbed_edit().map(Preview::from);
+    }
+
+    fn grabbed_edit(&self) -> Option<Edited> {
+        let Some(Gesture::Grab {
+            clip,
+            grip: Grip::Body,
+            from,
+            to,
+            free,
+        }) = self.gesture
+        else {
+            return None;
+        };
+        if !self.moved(from, to) {
+            return None;
+        }
+        let offset = self.snapped(clip.start + (to.at - from.at), free) - clip.start;
+        let rows = self.rows_between(from.track, to.track)?;
+        let clips: Vec<ClipKey> = self.selection.iter().copied().collect();
+        self.history.present().move_clips(&clips, offset, rows).ok()
+    }
+
+    fn snapped(&self, position: Position<Musical>, free: bool) -> Position<Musical> {
+        if free {
+            position
+        } else {
+            let time_signatures = self.history.present().time_signature_map();
+            self.viewport
+                .snap(self.viewport.x_of(position), time_signatures)
+        }
+    }
+
+    fn rows_between(&self, from: TrackId, to: TrackId) -> Option<isize> {
+        let row = |track| {
+            let index = self
+                .history
+                .present()
+                .tracks()
+                .position(|other| other.id() == track)?;
+            isize::try_from(index).ok()
+        };
+        Some(row(to)? - row(from)?)
     }
 
     fn moved(&self, from: Spot, to: Spot) -> bool {
@@ -210,7 +285,11 @@ mod tests {
         };
         let project = clips.iter().fold(
             project
-                .add_source(AudioSource::new(source, "kick.wav", second))
+                .add_source(AudioSource::new(
+                    source,
+                    "kick.wav",
+                    Duration::from_seconds(10),
+                ))
                 .unwrap(),
             |project, &(row, quarter_notes)| {
                 let start = Position::from_quarter_notes(quarter_notes);
@@ -493,6 +572,201 @@ mod tests {
         run(&mut app, Command::Duplicate);
         assert_eq!(starts(&app, tracks[0]), [0, 2]);
         assert_eq!(selected(&app), [key(tracks[0], 2)]);
+    }
+
+    const QUARTER: i64 = 705_600;
+
+    fn grab(app: &mut App, clip: ClipKey, grip: Grip, track: TrackId, ticks: i64, free: bool) {
+        point(
+            app,
+            Pointer::Pressed {
+                track,
+                at: Position::from_ticks(ticks),
+                grip: Some((clip, grip)),
+                toggle: false,
+                free,
+            },
+        );
+    }
+
+    fn drag_ticks(app: &mut App, track: TrackId, ticks: i64, free: bool) {
+        let at = Position::from_ticks(ticks);
+        point(app, Pointer::Moved { track, at, free });
+    }
+
+    fn drop_ticks(app: &mut App, track: TrackId, ticks: i64, free: bool) {
+        drag_ticks(app, track, ticks, free);
+        let at = Position::from_ticks(ticks);
+        point(app, Pointer::Released { track, at, free });
+    }
+
+    fn start_ticks(app: &App, track: TrackId) -> Vec<i64> {
+        app.history
+            .present()
+            .track(track)
+            .unwrap()
+            .timeline()
+            .map(|(start, _)| start.ticks())
+            .collect()
+    }
+
+    #[test]
+    fn a_drag_moves_the_clip_and_snaps_its_start_to_the_grid() {
+        let (mut app, tracks) = with_clips(&[(0, 0)]);
+        grab(
+            &mut app,
+            key(tracks[0], 0),
+            Grip::Body,
+            tracks[0],
+            QUARTER,
+            false,
+        );
+        drop_ticks(&mut app, tracks[0], 3 * QUARTER + 4 * QUARTER / 10, false);
+        assert_eq!(start_ticks(&app, tracks[0]), [2 * QUARTER]);
+        assert_eq!(selected(&app), [key(tracks[0], 2)]);
+    }
+
+    #[test]
+    fn with_alt_a_drag_moves_the_clip_without_snap() {
+        let (mut app, tracks) = with_clips(&[(0, 0)]);
+        grab(
+            &mut app,
+            key(tracks[0], 0),
+            Grip::Body,
+            tracks[0],
+            QUARTER,
+            true,
+        );
+        drop_ticks(&mut app, tracks[0], 3 * QUARTER + 4 * QUARTER / 10, true);
+        assert_eq!(
+            start_ticks(&app, tracks[0]),
+            [2 * QUARTER + 4 * QUARTER / 10]
+        );
+    }
+
+    #[test]
+    fn a_drag_to_another_track_moves_the_clip_there() {
+        let (mut app, tracks) = with_clips(&[(0, 0)]);
+        grab(
+            &mut app,
+            key(tracks[0], 0),
+            Grip::Body,
+            tracks[0],
+            QUARTER,
+            false,
+        );
+        drop_ticks(&mut app, tracks[1], QUARTER, false);
+        assert_eq!(start_ticks(&app, tracks[0]), Vec::<i64>::new());
+        assert_eq!(start_ticks(&app, tracks[1]), [0]);
+        assert_eq!(selected(&app), [key(tracks[1], 0)]);
+    }
+
+    #[test]
+    fn a_drag_moves_all_the_selected_clips_together() {
+        let (mut app, tracks) = with_clips(&[(0, 0), (1, 4)]);
+        click(&mut app, key(tracks[0], 0), true);
+        click(&mut app, key(tracks[1], 4), true);
+        grab(
+            &mut app,
+            key(tracks[0], 0),
+            Grip::Body,
+            tracks[0],
+            QUARTER,
+            false,
+        );
+        drop_ticks(&mut app, tracks[0], 3 * QUARTER, false);
+        assert_eq!(start_ticks(&app, tracks[0]), [2 * QUARTER]);
+        assert_eq!(start_ticks(&app, tracks[1]), [6 * QUARTER]);
+    }
+
+    #[test]
+    fn the_moved_clips_show_before_the_release() {
+        let (mut app, tracks) = with_clips(&[(0, 0)]);
+        grab(
+            &mut app,
+            key(tracks[0], 0),
+            Grip::Body,
+            tracks[0],
+            QUARTER,
+            false,
+        );
+        drag_ticks(&mut app, tracks[0], 3 * QUARTER, false);
+        let (shown, selection) = app.shown();
+        let first = shown.track(tracks[0]).unwrap().timeline().next().unwrap();
+        assert_eq!(first.0, Position::from_quarter_notes(2));
+        assert_eq!(selection, &BTreeSet::from([key(tracks[0], 2)]));
+        assert_eq!(app.timeline_view(Position::START).selection, selection);
+        assert_eq!(start_ticks(&app, tracks[0]), [0]);
+    }
+
+    #[test]
+    fn a_move_is_one_undo_step() {
+        let (mut app, tracks) = with_clips(&[(0, 0)]);
+        grab(
+            &mut app,
+            key(tracks[0], 0),
+            Grip::Body,
+            tracks[0],
+            QUARTER,
+            false,
+        );
+        drop_ticks(&mut app, tracks[0], 3 * QUARTER, false);
+        run(&mut app, Command::Undo);
+        assert_eq!(start_ticks(&app, tracks[0]), [0]);
+        assert!(!app.history.can_undo());
+    }
+
+    #[test]
+    fn escape_during_a_drag_leaves_the_clips_where_they_were() {
+        let (mut app, tracks) = with_clips(&[(0, 0)]);
+        grab(
+            &mut app,
+            key(tracks[0], 0),
+            Grip::Body,
+            tracks[0],
+            QUARTER,
+            false,
+        );
+        drag_ticks(&mut app, tracks[0], 3 * QUARTER, false);
+        run(&mut app, Command::Cancel);
+        let _ = app.update(Message::DragEnded);
+        assert_eq!(start_ticks(&app, tracks[0]), [0]);
+        assert!(!app.history.can_undo());
+        assert_eq!(app.shown().0, app.history.present());
+    }
+
+    #[test]
+    fn a_drag_of_less_than_4_pixels_is_a_click() {
+        let (mut app, tracks) = with_clips(&[(0, 0), (0, 4)]);
+        click(&mut app, key(tracks[0], 0), true);
+        click(&mut app, key(tracks[0], 4), true);
+        grab(
+            &mut app,
+            key(tracks[0], 0),
+            Grip::Body,
+            tracks[0],
+            QUARTER,
+            false,
+        );
+        drop_ticks(&mut app, tracks[0], QUARTER + 3 * QUARTER / 32, false);
+        assert_eq!(start_ticks(&app, tracks[0]), [0, 4 * QUARTER]);
+        assert_eq!(selected(&app), [key(tracks[0], 0)]);
+    }
+
+    #[test]
+    fn a_release_outside_the_lanes_moves_the_clips_where_they_were_shown() {
+        let (mut app, tracks) = with_clips(&[(0, 0)]);
+        grab(
+            &mut app,
+            key(tracks[0], 0),
+            Grip::Body,
+            tracks[0],
+            QUARTER,
+            false,
+        );
+        drag_ticks(&mut app, tracks[0], 3 * QUARTER, false);
+        let _ = app.update(Message::DragEnded);
+        assert_eq!(start_ticks(&app, tracks[0]), [2 * QUARTER]);
     }
 
     #[test]
