@@ -22,7 +22,7 @@ Record 0008 gives a project folder with the name `MySong.sibilant` and a file `p
 - The project file is JSON text with a format version. The migrations of record 0008 apply. Positions are in ticks, and lengths are in superclocks (record 0021). Each path in the file is relative to the project folder and uses the `/` character.
 - Save copies each audio file that is not in the `audio` folder into that folder. Sibilant copies each file only one time. If the folder has a file with the same name, the copy gets a number, for example `Kick 2.wav`.
 - Sibilant writes the project file and each copy to a temporary file first. Then it renames the temporary file (record 0008).
-- Sibilant makes the `autosave` and `cache` folders when it needs them. Autosave and recovery after a crash come in a later version.
+- Sibilant makes the `autosave` and `cache` folders when it needs them. Record 0039 gives the rules for autosave and for recovery after a crash.
 - The File menu at the left end of the top bar contains New, Open, Save, and Save As. The shortcuts are Ctrl+N, Ctrl+O, Ctrl+S, and Ctrl+Shift+S. On macOS, the shortcuts use Cmd.
 - Open and Save As use the file dialogs of the operating system, through the `rfd` crate. On Linux, the dialogs come from the XDG desktop portal.
 - Save As makes a new project folder with the name that the user gives. If the user selects a project file in a folder with the same name, Sibilant saves into that folder. Sibilant does not replace a different project with the same name. It shows an error.

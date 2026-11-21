@@ -53,3 +53,4 @@ To change a decision, write a new record. Then change the status of the old reco
 | [0036](0036-fades-at-clip-edges.md) | Fade each clip edge for 4 ms |
 | [0037](0037-preview-with-a-click.md) | Preview audio files with a click in the browser |
 | [0038](0038-project-file-in-a-project-folder.md) | Save each project as a .sibilant file in a project folder |
+| [0039](0039-autosave-recovery-copies.md) | Write recovery copies automatically and offer them after a crash |
