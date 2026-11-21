@@ -88,7 +88,7 @@ fn display_name(path: &Path) -> String {
     )
 }
 
-fn write_through_temporary(
+pub(crate) fn write_through_temporary(
     target: &Path,
     write: impl FnOnce(&Path) -> io::Result<()>,
 ) -> io::Result<()> {
