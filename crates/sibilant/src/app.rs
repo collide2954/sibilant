@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 
 use iced::{Element, Subscription, Task, Theme, event, keyboard, mouse, window};
 use sibilant_core::history::History;
@@ -32,6 +33,7 @@ mod dialogs;
 mod document;
 mod editing;
 mod file;
+mod metering;
 mod mixing;
 mod preview;
 mod restore;
@@ -44,6 +46,7 @@ use autosave::{Copying, Recovery};
 use document::{Document, DocumentId};
 use editing::{Gesture, Preview};
 use file::{Saving, Target};
+use metering::Metering;
 use preview::Previews;
 use unsaved::Leave;
 
@@ -73,7 +76,7 @@ pub(crate) enum Message {
     CloseRequested(window::Id),
     Menu(menu::Event),
     DragEnded,
-    Frame,
+    Frame(Instant),
 }
 
 #[derive(Debug)]
@@ -102,6 +105,7 @@ pub(crate) struct App {
     gesture: Option<Gesture>,
     preview: Option<Preview>,
     meters: Meters,
+    metering: Metering,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,6 +150,7 @@ impl Default for App {
             gesture: None,
             preview: None,
             meters: Meters::default(),
+            metering: Metering::default(),
         }
     }
 }
@@ -203,9 +208,10 @@ impl App {
                 self.dragging = None;
                 self.finish_gesture();
             }
-            Message::Frame => {
+            Message::Frame(now) => {
                 if let Some(audio) = self.audio.as_mut() {
                     audio.controller.release_old();
+                    self.meters = self.metering.update(&audio.controller.take_levels(), now);
                 }
                 self.playing = self
                     .audio
@@ -311,8 +317,8 @@ impl App {
         let shortcuts = keyboard::listen()
             .filter_map(Command::from_key_event)
             .map(Message::Command);
-        let frames = (self.playing || self.previews.is_playing())
-            .then(|| window::frames().map(|_| Message::Frame));
+        let frames = (self.playing || self.previews.is_playing() || self.metering.is_moving())
+            .then(|| window::frames().map(Message::Frame));
         let drag_end = (self.dragging.is_some() || self.gesture.is_some())
             .then(|| event::listen_with(release_that_no_track_takes));
         let close_requests = window::close_requests().map(Message::CloseRequested);
@@ -525,6 +531,7 @@ fn change_mix(
 mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
+    use std::time::Instant;
 
     use iced::Task;
     use iced_test::simulator;
@@ -749,10 +756,10 @@ mod tests {
         let (mut app, mut engine) = with_simulated_audio();
         list_kick(&mut app);
         hear_kick(&mut app, 100);
-        let _ = app.update(Message::Frame);
+        let _ = app.update(Message::Frame(Instant::now()));
         assert!(shows_a_speaker(&app));
         let _ = render(&mut engine, 480);
-        let _ = app.update(Message::Frame);
+        let _ = app.update(Message::Frame(Instant::now()));
         assert!(!shows_a_speaker(&app));
     }
 
@@ -958,6 +965,19 @@ mod tests {
     }
 
     #[test]
+    fn each_frame_shows_the_levels_of_the_engine_in_the_meters() {
+        let (mut app, mut engine) = with_simulated_audio();
+        let track = first_track(&app).id();
+        place(&mut app, Some(track), Position::START, "kick");
+        run(&mut app, Command::PlayOrStop);
+        let _ = render(&mut engine, 480);
+        let _ = app.update(Message::Frame(Instant::now()));
+        assert!(app.meters.tracks[0].level > 0.4, "{:?}", app.meters);
+        assert!(app.meters.master.level > 0.4, "{:?}", app.meters);
+        assert!(app.metering.is_moving());
+    }
+
+    #[test]
     fn the_engine_hears_a_fader_while_it_is_dragged_and_after_escape() {
         let (mut app, mut engine) = with_simulated_audio();
         let track = first_track(&app).id();
@@ -999,7 +1019,7 @@ mod tests {
         let (mut app, mut engine) = with_simulated_audio();
         run(&mut app, Command::PlayOrStop);
         engine.process(&mut vec![0.0; 96_000], 2);
-        let _ = app.update(Message::Frame);
+        let _ = app.update(Message::Frame(Instant::now()));
         let mut ui = simulator(app.view());
         assert!(ui.find("1.3.1").is_ok());
         assert!(ui.find("0:01.000").is_ok());
@@ -1010,11 +1030,11 @@ mod tests {
         let (mut app, mut engine) = with_simulated_audio();
         run(&mut app, Command::PlayOrStop);
         engine.process(&mut [0.0; 512], 2);
-        let _ = app.update(Message::Frame);
+        let _ = app.update(Message::Frame(Instant::now()));
         assert!(app.playing);
         run(&mut app, Command::PlayOrStop);
         engine.process(&mut [0.0; 512], 2);
-        let _ = app.update(Message::Frame);
+        let _ = app.update(Message::Frame(Instant::now()));
         assert!(!app.playing);
     }
 
