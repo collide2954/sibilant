@@ -136,6 +136,10 @@ impl App {
         }
     }
 
+    pub(super) fn start_new_project(&mut self) {
+        self.start_document(Project::new(&mut Ids::default()), None);
+    }
+
     fn start_document(&mut self, project: Project, location: Option<Location>) {
         self.ids = Ids::after(&project);
         self.document = Document::new(&project, location);

@@ -289,6 +289,7 @@ impl App {
                 self.send(engine::Command::SetMetronome(self.metronome));
             }
             Command::Drop { track, start } => return self.import(Placement { track, start }),
+            Command::New => self.start_new_project(),
             Command::Open => return dialogs::open_file().map(Message::OpenFrom),
             Command::Save => return self.save(),
             Command::SaveAs => return self.save_as(),
@@ -1131,6 +1132,28 @@ mod tests {
             copies: Copies::default(),
         };
         finish_saving(app, project, Ok(saved));
+    }
+
+    #[test]
+    fn new_starts_a_new_project_without_a_file() {
+        let mut app = App::default();
+        let _ = open_my_song(&mut app);
+        run(&mut app, Command::AddTrack);
+        let present = project(&app).clone();
+        saved_as_my_song(&mut app, present);
+        assert_eq!(app.update(Message::Command(Command::New)).units(), 0);
+        assert_eq!(track_names(&app), ["Audio 1", "Audio 2"]);
+        assert_eq!(app.title(), "Untitled — Sibilant");
+        assert!(!app.history.can_undo());
+    }
+
+    #[test]
+    fn save_of_a_new_project_asks_where_to_save_it() {
+        let mut app = App::default();
+        let _ = open_my_song(&mut app);
+        run(&mut app, Command::New);
+        assert_eq!(app.update(Message::Command(Command::Save)).units(), 1);
+        assert!(!app.saving);
     }
 
     #[test]
