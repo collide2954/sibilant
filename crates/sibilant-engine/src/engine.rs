@@ -1,6 +1,6 @@
 use std::mem;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicUsize, Ordering};
 
 use rtrb::{Consumer, Producer, RingBuffer};
 use sibilant_core::time::{Musical, Position};
@@ -30,6 +30,13 @@ struct Shared {
     previewing: AtomicBool,
     previews_started: AtomicUsize,
     playhead: AtomicI64,
+    output: AtomicU32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Levels {
+    pub tracks: Vec<f32>,
+    pub output: f32,
 }
 
 #[derive(Debug)]
@@ -40,6 +47,7 @@ pub struct Controller {
     previews: Producer<Arc<AudioBuffer>>,
     released_previews: Consumer<Arc<AudioBuffer>>,
     shared: Arc<Shared>,
+    meters: Arc<[AtomicU32]>,
 }
 
 #[derive(Debug)]
@@ -77,6 +85,7 @@ pub fn new(arrangement: Arrangement) -> (Controller, Engine) {
         previews,
         released_previews,
         shared: Arc::clone(&shared),
+        meters: Arc::clone(arrangement.meters()),
     };
     let sample_rate = arrangement.timing().sample_rate();
     let engine = Engine {
@@ -120,7 +129,19 @@ impl Controller {
     }
 
     pub fn replace_arrangement(&mut self, arrangement: Arrangement) -> bool {
-        self.arrangements.push(Box::new(arrangement)).is_ok()
+        let meters = Arc::clone(arrangement.meters());
+        let sent = self.arrangements.push(Box::new(arrangement)).is_ok();
+        if sent {
+            self.meters = meters;
+        }
+        sent
+    }
+
+    pub fn take_levels(&self) -> Levels {
+        Levels {
+            tracks: self.meters.iter().map(take).collect(),
+            output: take(&self.shared.output),
+        }
     }
 
     pub fn preview(&mut self, audio: Arc<AudioBuffer>) -> bool {
@@ -163,6 +184,13 @@ impl Engine {
             };
             add(samples, frame);
         }
+        let peak = output
+            .chunks_exact(channels)
+            .flat_map(|samples| samples.iter().take(2))
+            .fold(0.0_f32, |peak, sample| peak.max(sample.abs()));
+        self.shared
+            .output
+            .fetch_max(peak.to_bits(), Ordering::Relaxed);
         if self.playing {
             self.playhead = end;
         }
@@ -231,7 +259,9 @@ impl Engine {
 }
 
 fn mix_clips(arrangement: &Arrangement, output: &mut [f32], channels: usize, start: i64, end: i64) {
+    let master = arrangement.master();
     for track in arrangement.tracks() {
+        let mut peak = 0.0_f32;
         let first = track.clips.partition_point(|clip| clip.end <= start);
         for clip in track.clips[first..]
             .iter()
@@ -243,11 +273,20 @@ fn mix_clips(arrangement: &Arrangement, output: &mut [f32], channels: usize, sta
                 (from..clip.end.min(end)).zip(output.chunks_exact_mut(channels).skip(skip));
             for (frame, samples) in frames {
                 if let Some([left, right]) = clip.sample(frame) {
-                    add(samples, [left * track.gains[0], right * track.gains[1]]);
+                    let [left, right] = [left * track.gains[0], right * track.gains[1]];
+                    peak = peak.max(left.abs()).max(right.abs());
+                    add(samples, [left * master, right * master]);
                 }
             }
         }
+        if let Some(meter) = arrangement.meters().get(track.meter) {
+            meter.fetch_max(peak.to_bits(), Ordering::Relaxed);
+        }
     }
+}
+
+fn take(level: &AtomicU32) -> f32 {
+    f32::from_bits(level.swap(0, Ordering::Relaxed))
 }
 
 fn add(samples: &mut [f32], [left, right]: [f32; 2]) {
@@ -295,10 +334,88 @@ mod tests {
     }
 
     fn track(gains: [f32; 2], clip: ClipPlayback) -> TrackPlayback {
+        track_at(0, gains, clip)
+    }
+
+    fn track_at(meter: usize, gains: [f32; 2], clip: ClipPlayback) -> TrackPlayback {
         TrackPlayback {
             gains,
+            meter,
             clips: vec![clip],
         }
+    }
+
+    fn two_tracks() -> Engine {
+        playing(vec![
+            track_at(0, [0.5, 0.25], clip(0, 100, 0, 1, vec![vec![0.8; 100]])),
+            track_at(1, [1.0, 1.0], clip(0, 100, 0, 1, vec![vec![0.3; 100]])),
+        ])
+    }
+
+    #[test]
+    fn the_engine_reports_the_peak_of_each_track_and_of_the_output() {
+        let (mut controller, mut engine) = engine_with(vec![
+            track_at(0, [0.5, 0.25], clip(0, 100, 0, 1, vec![vec![0.8; 100]])),
+            track_at(1, [1.0, 1.0], clip(0, 100, 0, 1, vec![vec![0.3; 100]])),
+        ]);
+        controller.send(Command::TogglePlay);
+        let _ = run(&mut engine, 100);
+        let levels = controller.take_levels();
+        assert!((levels.tracks[0] - 0.4).abs() < 1e-6, "{levels:?}");
+        assert!((levels.tracks[1] - 0.3).abs() < 1e-6, "{levels:?}");
+        assert!((levels.output - 0.7).abs() < 1e-6, "{levels:?}");
+    }
+
+    #[test]
+    fn taking_the_levels_starts_them_again_from_silence() {
+        let (mut controller, mut engine) = engine_with(vec![track(
+            [1.0, 1.0],
+            clip(0, 100, 0, 1, vec![vec![0.5; 100]]),
+        )]);
+        controller.send(Command::TogglePlay);
+        let _ = run(&mut engine, 100);
+        let _ = controller.take_levels();
+        let levels = controller.take_levels();
+        assert_eq!((levels.tracks, levels.output), (vec![0.0], 0.0));
+    }
+
+    #[test]
+    fn the_master_gain_scales_the_output_but_not_the_track_meters() {
+        let arrangement = Arrangement::new(
+            timing(),
+            vec![track([1.0, 1.0], clip(0, 100, 0, 1, vec![vec![0.8; 100]]))],
+        )
+        .with_master(0.5);
+        let (mut controller, mut engine) = engine::new(arrangement);
+        controller.send(Command::TogglePlay);
+        let buffer = run(&mut engine, 100);
+        let levels = controller.take_levels();
+        assert!((buffer[100] - 0.4).abs() < 1e-6, "{}", buffer[100]);
+        assert!((levels.tracks[0] - 0.8).abs() < 1e-6, "{levels:?}");
+        assert!((levels.output - 0.4).abs() < 1e-6, "{levels:?}");
+    }
+
+    #[test]
+    fn the_levels_follow_a_new_arrangement() {
+        let (mut controller, mut engine) = engine();
+        assert!(controller.replace_arrangement(Arrangement::new(
+            timing(),
+            vec![track_at(
+                2,
+                [1.0, 1.0],
+                clip(0, 100, 0, 1, vec![vec![0.5; 100]])
+            )],
+        )));
+        controller.send(Command::TogglePlay);
+        let _ = run(&mut engine, 100);
+        assert_eq!(controller.take_levels().tracks, vec![0.0, 0.0, 0.5]);
+    }
+
+    #[test]
+    fn metering_never_allocates_memory_in_the_engine() {
+        let mut engine = two_tracks();
+        let mut buffer = vec![0.0; 1_024];
+        assert_no_alloc(|| engine.process(&mut buffer, 2));
     }
 
     fn clip(start: i64, end: i64, offset: i64, fade: i64, audio: Vec<Vec<f32>>) -> ClipPlayback {

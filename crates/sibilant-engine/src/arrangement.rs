@@ -1,6 +1,7 @@
 use std::sync::Arc;
+use std::sync::atomic::AtomicU32;
 
-use sibilant_core::project::{Project, SourceId, Track};
+use sibilant_core::project::{Project, SourceId, Track, TrackId};
 
 use crate::timing::Timing;
 
@@ -64,18 +65,36 @@ pub struct ClipPlayback {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TrackPlayback {
     pub gains: [f32; 2],
+    pub meter: usize,
     pub clips: Vec<ClipPlayback>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Arrangement {
     timing: Timing,
     tracks: Vec<TrackPlayback>,
+    master: f32,
+    meters: Arc<[AtomicU32]>,
 }
 
 impl Arrangement {
     pub fn new(timing: Timing, tracks: Vec<TrackPlayback>) -> Self {
-        Self { timing, tracks }
+        let meters = tracks
+            .iter()
+            .map(|track| track.meter + 1)
+            .max()
+            .unwrap_or(0);
+        Self {
+            timing,
+            tracks,
+            master: 1.0,
+            meters: silent(meters),
+        }
+    }
+
+    #[must_use]
+    pub fn with_master(self, master: f32) -> Self {
+        Self { master, ..self }
     }
 
     pub fn of_project(
@@ -88,20 +107,28 @@ impl Arrangement {
             project.tempo_map().clone(),
             project.time_signature_map().clone(),
         );
-        let master = project.master_gain().amplitude();
+        let heard: Vec<TrackId> = project.heard_tracks().map(Track::id).collect();
         let tracks = project
-            .heard_tracks()
-            .map(|track| {
+            .tracks()
+            .enumerate()
+            .filter(|(_, track)| heard.contains(&track.id()))
+            .map(|(meter, track)| {
                 let mix = track.mix();
-                let gain = mix.gain.amplitude() * master;
+                let gain = mix.gain.amplitude();
                 let pan = mix.pan.channel_gains();
                 TrackPlayback {
                     gains: [to_f32(gain * pan.left), to_f32(gain * pan.right)],
+                    meter,
                     clips: clips(&timing, track, &audio),
                 }
             })
             .collect();
-        Self { timing, tracks }
+        Self {
+            timing,
+            tracks,
+            master: to_f32(project.master_gain().amplitude()),
+            meters: silent(project.tracks().len()),
+        }
     }
 
     pub fn timing(&self) -> &Timing {
@@ -111,6 +138,22 @@ impl Arrangement {
     pub fn tracks(&self) -> &[TrackPlayback] {
         &self.tracks
     }
+
+    pub fn master(&self) -> f32 {
+        self.master
+    }
+
+    pub fn meter_count(&self) -> usize {
+        self.meters.len()
+    }
+
+    pub(crate) fn meters(&self) -> &Arc<[AtomicU32]> {
+        &self.meters
+    }
+}
+
+fn silent(meters: usize) -> Arc<[AtomicU32]> {
+    (0..meters).map(|_| AtomicU32::new(0)).collect()
 }
 
 fn clips(
@@ -288,7 +331,7 @@ mod tests {
     }
 
     #[test]
-    fn each_track_gets_its_gain_its_pan_and_the_master_gain() {
+    fn each_track_gets_its_gain_and_its_pan_and_the_output_gets_the_master_gain() {
         let mut session = Session::new(seconds(2));
         let mix = Mix {
             gain: Gain::from_db(-20.0).unwrap(),
@@ -300,10 +343,12 @@ mod tests {
             .set_mix(session.track, mix)
             .unwrap()
             .with_master_gain(Gain::from_db(6.0).unwrap());
-        let [left, right] = session.arrangement().tracks()[0].gains;
-        let master = 10_f32.powf(0.3);
-        assert!((left - 0.05 * master).abs() < 1e-6, "left {left}");
-        assert!((right - 0.1 * master).abs() < 1e-6, "right {right}");
+        let arrangement = session.arrangement();
+        let [left, right] = arrangement.tracks()[0].gains;
+        assert!((left - 0.05).abs() < 1e-6, "left {left}");
+        assert!((right - 0.1).abs() < 1e-6, "right {right}");
+        let master = arrangement.master();
+        assert!((master - 10_f32.powf(0.3)).abs() < 1e-6, "master {master}");
     }
 
     #[test]
@@ -315,6 +360,19 @@ mod tests {
         };
         session.project = session.project.set_mix(session.track, muted).unwrap();
         assert_eq!(session.arrangement().tracks().len(), 1);
+    }
+
+    #[test]
+    fn each_heard_track_meters_into_the_place_of_its_track() {
+        let mut session = Session::new(seconds(2));
+        let muted = Mix {
+            mute: true,
+            ..Mix::default()
+        };
+        session.project = session.project.set_mix(session.track, muted).unwrap();
+        let arrangement = session.arrangement();
+        assert_eq!(arrangement.tracks()[0].meter, 1);
+        assert_eq!(arrangement.meter_count(), 2);
     }
 
     #[test]
