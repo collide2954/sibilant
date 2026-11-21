@@ -41,6 +41,7 @@ pub fn unsaved_changes<'a>(name: &str, palette: Palette) -> Element<'a, Choice> 
     card(
         format!("Do you want to save the changes to “{name}”?"),
         "Your changes are lost if you do not save them.".to_owned(),
+        Vec::new(),
         buttons,
         palette,
     )
@@ -60,6 +61,7 @@ pub fn restore<'a>(name: &str, age: Duration, palette: Palette) -> Element<'a, R
             "Sibilant closed before you saved them. The newest copy is from {}.",
             ago(age)
         ),
+        Vec::new(),
         buttons,
         palette,
     )
@@ -93,15 +95,19 @@ pub fn modal<'a, Message: 'a>(
     stack![base.into(), opaque(layer)].into()
 }
 
-fn card<'a, Message: 'a>(
+pub(crate) fn card<'a, Message: 'a>(
     question: String,
     detail: String,
+    settings: Vec<Element<'a, Message>>,
     buttons: Row<'a, Message>,
     palette: Palette,
 ) -> Element<'a, Message> {
     let question = text(question).size(QUESTION_SIZE).color(palette.text);
     let detail = text(detail).size(TEXT_SIZE).color(palette.text_muted);
-    let content = column![question, detail, buttons.spacing(BUTTON_SPACING)].spacing(SPACING);
+    let content = column![question, detail]
+        .extend(settings)
+        .push(buttons.spacing(BUTTON_SPACING))
+        .spacing(SPACING);
     container(content)
         .width(WIDTH)
         .padding(PADDING)
@@ -117,15 +123,15 @@ fn card<'a, Message: 'a>(
         .into()
 }
 
-fn primary(palette: Palette) -> (Color, Color) {
+pub(crate) fn primary(palette: Palette) -> (Color, Color) {
     (palette.accent, palette.on_accent)
 }
 
-fn quiet(palette: Palette) -> (Color, Color) {
+pub(crate) fn quiet(palette: Palette) -> (Color, Color) {
     (palette.surface, palette.text)
 }
 
-fn choice_button<'a, Message: Clone + 'a>(
+pub(crate) fn choice_button<'a, Message: Clone + 'a>(
     label: &'static str,
     choice: Message,
     (background, foreground): (Color, Color),

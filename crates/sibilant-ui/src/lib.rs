@@ -1,6 +1,7 @@
 pub mod browser;
 pub mod command;
 pub mod dialog;
+pub mod export;
 pub mod fonts;
 pub mod icons;
 pub mod menu;
