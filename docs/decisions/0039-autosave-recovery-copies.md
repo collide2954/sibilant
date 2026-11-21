@@ -20,9 +20,10 @@ A crash or a power cut must not remove much work. Record 0038 gives an `autosave
 - Each running Sibilant has a session folder in the recovery folder. The session folder contains a lock file and a small file that gives the project file and the newest copy. The copies and the audio of a project without a project folder are also in the session folder.
 - Sibilant keeps the lock file locked while it runs. The operating system unlocks the file when the process stops, also after a crash.
 - Sibilant removes its session folder when the window closes normally, after a new project, and after Open. After Save, Sibilant removes the copies and the audio of a project that had no project folder.
-- When Sibilant starts, it looks for session folders that are not locked and that give a copy. For each such folder, a dialog in the Sibilant window asks "Restore" or "Don't Restore". The dialog gives the name of the project and the age of the copy, for example "4 minutes ago".
-  - Restore opens the copy. The title shows a dot (●), because the copy is not saved. Save writes the project file at its usual location. For a project without a project folder, Save does the same as Save As.
-  - Don't Restore removes the session folder. The copies in the `autosave` folder of the project stay.
+- When Sibilant starts, it looks for session folders that are not locked. A session folder has something to restore when it gives a copy that is newer than the project file. Sibilant removes the other session folders that are not locked.
+- For each session folder that has something to restore, a dialog in the Sibilant window asks "Restore" or "Don't Restore". The dialog gives the name of the project and the age of the copy, for example "4 minutes ago".
+  - Restore opens the copy. The title shows a dot (●), because the copy is not saved. Save writes the project file at its usual location. For a project without a project folder, Save does the same as Save As. Sibilant uses the session folder of the copy as its own session folder. After Restore, Sibilant asks about the other session folders at the next start.
+  - Don't Restore removes the session folder. The copies in the `autosave` folder of the project stay. Then Sibilant asks about the next session folder.
   - The Enter key gives Restore. The Esc key closes the dialog, and Sibilant asks again at the next start.
 - Autosave and Save do not write at the same time. If the user saves while autosave writes, the save starts when autosave ends. If the time for a copy comes while a save writes, Sibilant does not write that copy.
 
