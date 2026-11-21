@@ -18,6 +18,7 @@ pub enum Command {
     Continue,
     SetMetronome(bool),
     SetPreviewGain(f32),
+    Stop,
     StopPreview,
     TogglePlay,
 }
@@ -210,6 +211,11 @@ impl Engine {
                 self.playing = true;
             }
             Command::Continue => {}
+            Command::Stop => {
+                self.stopped_at = marker;
+                self.playhead = marker;
+                self.playing = false;
+            }
             Command::SetMetronome(on) => self.metronome = on,
             Command::SetPreviewGain(gain) => self.preview.set_gain(gain),
             Command::StopPreview => self.preview.stop(),
@@ -374,6 +380,38 @@ mod tests {
         controller.send(Command::Continue);
         let _ = run(&mut engine, 500);
         assert_eq!(controller.playhead(), 1_500);
+    }
+
+    #[test]
+    fn stop_ends_the_playback_and_returns_to_the_play_start() {
+        let (mut controller, mut engine) = engine();
+        controller.send(Command::TogglePlay);
+        let _ = run(&mut engine, 1_000);
+        controller.send(Command::Stop);
+        let _ = run(&mut engine, 10);
+        assert!(!controller.is_playing());
+        assert_eq!(controller.playhead(), 0);
+    }
+
+    #[test]
+    fn continue_after_a_stop_plays_from_the_play_start() {
+        let (mut controller, mut engine) = engine();
+        controller.send(Command::TogglePlay);
+        let _ = run(&mut engine, 1_000);
+        controller.send(Command::TogglePlay);
+        controller.send(Command::Stop);
+        controller.send(Command::Continue);
+        let _ = run(&mut engine, 500);
+        assert_eq!(controller.playhead(), 500);
+    }
+
+    #[test]
+    fn stop_leaves_a_stopped_engine_stopped() {
+        let (mut controller, mut engine) = engine();
+        controller.send(Command::Stop);
+        let _ = run(&mut engine, 100);
+        assert!(!controller.is_playing());
+        assert_eq!(controller.playhead(), 0);
     }
 
     #[test]
