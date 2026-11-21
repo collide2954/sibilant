@@ -4,6 +4,7 @@ pub mod dialog;
 pub mod fonts;
 pub mod icons;
 pub mod menu;
+pub mod mixer;
 #[cfg(test)]
 mod pixels;
 pub mod shell;
