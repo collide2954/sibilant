@@ -3,6 +3,7 @@ use iced::mouse::ScrollDelta;
 use sibilant_core::project::TrackId;
 use sibilant_core::time::{Musical, Position};
 
+use crate::mixer::Mixing;
 use crate::timeline::Pointer;
 
 const WHEEL_LINE: f32 = 48.0;
@@ -20,6 +21,7 @@ pub enum Command {
     },
     Duplicate,
     Locate(Position<Musical>),
+    Mix(Mixing),
     New,
     Open,
     PlayOrStop,

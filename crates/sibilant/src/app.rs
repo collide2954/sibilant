@@ -382,7 +382,7 @@ impl App {
                 self.selection.clear();
                 self.stop_preview();
             }
-            Command::Confirm => {}
+            Command::Confirm | Command::Mix(_) => {}
         }
         Task::none()
     }
