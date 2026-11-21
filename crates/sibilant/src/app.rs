@@ -7,7 +7,7 @@ use iced::{Element, Subscription, Task, Theme, event, keyboard, mouse, window};
 use sibilant_core::history::History;
 use sibilant_core::mix::Mix;
 use sibilant_core::project::{
-    AudioSource, Clip, EditError, Ids, Project, Region, SourceId, TrackId,
+    AudioSource, Clip, ClipKey, EditError, Ids, Project, Region, SourceId, TrackId,
 };
 use sibilant_core::time::{Duration, Musical, Position};
 use sibilant_engine::arrangement::{Arrangement, AudioBuffer};
@@ -29,6 +29,7 @@ use crate::library::{self, LoadedAudio};
 mod autosave;
 mod dialogs;
 mod document;
+mod editing;
 mod file;
 mod preview;
 mod restore;
@@ -39,6 +40,7 @@ mod unsaved;
 
 use autosave::{Copying, Recovery};
 use document::{Document, DocumentId};
+use editing::Gesture;
 use file::{Saving, Target};
 use preview::Previews;
 use unsaved::Leave;
@@ -94,6 +96,8 @@ pub(crate) struct App {
     recovery: Recovery,
     overlay: Option<Overlay>,
     waiting: Option<Leave>,
+    selection: BTreeSet<ClipKey>,
+    gesture: Option<Gesture>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -134,6 +138,8 @@ impl Default for App {
             recovery: Recovery::default(),
             overlay: None,
             waiting: None,
+            selection: BTreeSet::new(),
+            gesture: None,
         }
     }
 }
@@ -187,7 +193,10 @@ impl App {
             Message::Restore(choice) => return self.answer_restore(choice),
             Message::CloseRequested(window) => return self.leave(Leave::Close(window)),
             Message::Menu(event) => return self.use_menu(event),
-            Message::DragEnded => self.dragging = None,
+            Message::DragEnded => {
+                self.dragging = None;
+                self.finish_gesture();
+            }
             Message::Frame => {
                 if let Some(audio) = self.audio.as_mut() {
                     audio.controller.release_old();
@@ -297,9 +306,7 @@ impl App {
             .map(Message::Command);
         let frames = (self.playing || self.previews.is_playing())
             .then(|| window::frames().map(|_| Message::Frame));
-        let drag_end = self
-            .dragging
-            .is_some()
+        let drag_end = (self.dragging.is_some() || self.gesture.is_some())
             .then(|| event::listen_with(release_that_no_track_takes));
         let close_requests = window::close_requests().map(Message::CloseRequested);
         let copies = (self.recovery.is_on() && self.document.needs_copy(self.history.present()))
@@ -336,10 +343,12 @@ impl App {
             }
             Command::Undo => {
                 self.history.undo();
+                self.selection.clear();
                 self.sync();
             }
             Command::Redo => {
                 self.history.redo();
+                self.selection.clear();
                 self.sync();
             }
             Command::ScrollTimeline { pixels } => {
@@ -361,7 +370,12 @@ impl App {
             Command::SaveAs => return self.save_as(),
             Command::Cancel if self.overlay == Some(Overlay::FileMenu) => self.overlay = None,
             Command::Locate(position) => self.locate(position),
-            Command::Cancel => self.stop_preview(),
+            Command::Pointer(pointer) => self.point(pointer),
+            Command::Cancel => {
+                self.gesture = None;
+                self.selection.clear();
+                self.stop_preview();
+            }
             Command::Confirm => {}
         }
         Task::none()
@@ -397,6 +411,19 @@ impl App {
         self.send(engine::Command::Locate(position));
     }
 
+    fn timeline_view(&self, playhead: Position<Musical>) -> View<'_> {
+        View {
+            viewport: self.viewport,
+            playhead,
+            play_start: self.play_start,
+            waveforms: &self.waveforms,
+            dragging: self.dragging.is_some(),
+            selection: &self.selection,
+            marquee: self.marquee(),
+            pointing: self.gesture.is_some(),
+        }
+    }
+
     pub(crate) fn view(&self) -> Element<'_, Message> {
         let project = self.history.present();
         let clock = self.audio.as_ref().map_or(Position::START, Audio::playhead);
@@ -411,13 +438,7 @@ impl App {
         };
         let transport = transport::view(display, self.palette).map(Message::Command);
         let browser = browser::view(&self.browser, self.palette).map(Message::Browser);
-        let timeline = View {
-            viewport: self.viewport,
-            playhead: position,
-            play_start: self.play_start,
-            waveforms: &self.waveforms,
-            dragging: self.dragging.is_some(),
-        };
+        let timeline = self.timeline_view(position);
         let tracks = track_area::view(project, timeline, self.palette).map(Message::Command);
         let open = self.overlay == Some(Overlay::FileMenu);
         let file = menu::file_button(open, self.palette).map(Message::Menu);

@@ -1,13 +1,13 @@
 use iced::keyboard::Modifiers;
 use iced::widget::canvas::{self, Action, Canvas, Event, Frame, Geometry};
 use iced::{Element, Length, Point, Rectangle, Renderer, Size, Theme, mouse};
-use sibilant_core::project::{Clip, Project, Track};
+use sibilant_core::project::{Clip, ClipKey, Project, Track};
 use sibilant_core::time::{Musical, Position};
 
 use super::drag::{drag_interaction, draw_drop_line, drop_action};
-use super::{View, Viewport, WaveColumn, draw_playhead, wheel};
+use super::{Grip, Marquee, Pointer, View, Viewport, WaveColumn, draw_playhead, wheel};
 use crate::command::Command;
-use crate::theme::Palette;
+use crate::theme::{Color, Palette};
 
 const CLIP_INSET: f32 = 2.0;
 const CLIP_GAP: f32 = 1.0;
@@ -15,6 +15,9 @@ const NAME_INSET: f32 = 4.0;
 const NAME_SIZE: f32 = 11.0;
 const WAVE_MARGIN: f32 = 2.0;
 const WAVE_ALPHA: f32 = 0.5;
+const EDGE: f32 = 6.0;
+const OUTLINE: f32 = 2.0;
+const MARQUEE_ALPHA: f32 = 0.2;
 
 struct Lane<'a> {
     view: View<'a>,
@@ -36,6 +39,7 @@ impl canvas::Program<Command> for Lane<'_> {
         let time_signatures = self.project.time_signature_map();
         let track = Some(self.track.id());
         drop_action(self.view, time_signatures, track, event, bounds, cursor)
+            .or_else(|| self.pointer(*modifiers, event, bounds, cursor))
             .or_else(|| wheel(modifiers, event, bounds, cursor))
     }
 
@@ -110,6 +114,12 @@ impl canvas::Program<Command> for Lane<'_> {
                     ..canvas::Text::default()
                 });
             });
+            if self.view.selection.contains(&self.key(clip_box.start)) {
+                draw_outline(&mut frame, area, palette.text);
+            }
+        }
+        if let Some(marquee) = self.view.marquee.filter(|marquee| self.is_inside(marquee)) {
+            draw_marquee(&mut frame, self.view.viewport, marquee, palette);
         }
         let time_signatures = self.project.time_signature_map();
         draw_drop_line(
@@ -123,6 +133,119 @@ impl canvas::Program<Command> for Lane<'_> {
         draw_playhead(&mut frame, self.view, palette);
         vec![frame.into_geometry()]
     }
+}
+
+impl Lane<'_> {
+    fn pointer(
+        &self,
+        modifiers: Modifiers,
+        event: &Event,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> Option<Action<Command>> {
+        let position = cursor.position_in(bounds)?;
+        let (track, free) = (self.track.id(), modifiers.alt());
+        let at = self.view.viewport.position_at(position.x);
+        let pointer = match event {
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+                if !self.view.dragging =>
+            {
+                Pointer::Pressed {
+                    track,
+                    at,
+                    grip: self.grip_at(position.x, bounds.width),
+                    toggle: modifiers.command(),
+                    free,
+                }
+            }
+            Event::Mouse(mouse::Event::CursorMoved { .. }) if self.view.pointing => {
+                Pointer::Moved { track, at, free }
+            }
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+                if self.view.pointing =>
+            {
+                Pointer::Released { track, at, free }
+            }
+            _ => return None,
+        };
+        Some(Action::publish(Command::Pointer(pointer)).and_capture())
+    }
+
+    fn grip_at(&self, x: f32, width: f32) -> Option<(ClipKey, Grip)> {
+        let clip_box = self
+            .view
+            .viewport
+            .clip_boxes(self.project, self.track, width)
+            .into_iter()
+            .find(|clip_box| clip_box.x <= x && x < clip_box.x + clip_box.width)?;
+        let edge = EDGE.min(clip_box.width / 3.0);
+        let grip = if x < clip_box.x + edge {
+            Grip::Start
+        } else if x >= clip_box.x + clip_box.width - edge {
+            Grip::End
+        } else {
+            Grip::Body
+        };
+        Some((self.key(clip_box.start), grip))
+    }
+
+    fn key(&self, start: Position<Musical>) -> ClipKey {
+        ClipKey {
+            track: self.track.id(),
+            start,
+        }
+    }
+
+    fn is_inside(&self, marquee: &Marquee) -> bool {
+        let index = |track| self.project.tracks().position(|other| other.id() == track);
+        let (Some(first), Some(last), Some(this)) = (
+            index(marquee.tracks.0),
+            index(marquee.tracks.1),
+            index(self.track.id()),
+        ) else {
+            return false;
+        };
+        (first.min(last)..=first.max(last)).contains(&this)
+    }
+}
+
+fn draw_outline(frame: &mut Frame, area: Rectangle, color: Color) {
+    let color = iced::Color::from(color);
+    let (left, top) = (area.x, area.y);
+    let (right, bottom) = (
+        area.x + area.width - OUTLINE,
+        area.y + area.height - OUTLINE,
+    );
+    frame.fill_rectangle(Point::new(left, top), Size::new(area.width, OUTLINE), color);
+    frame.fill_rectangle(
+        Point::new(left, bottom),
+        Size::new(area.width, OUTLINE),
+        color,
+    );
+    frame.fill_rectangle(
+        Point::new(left, top),
+        Size::new(OUTLINE, area.height),
+        color,
+    );
+    frame.fill_rectangle(
+        Point::new(right, top),
+        Size::new(OUTLINE, area.height),
+        color,
+    );
+}
+
+fn draw_marquee(frame: &mut Frame, viewport: Viewport, marquee: Marquee, palette: Palette) {
+    let height = frame.size().height;
+    let left = viewport.x_of(marquee.from.min(marquee.to));
+    let right = viewport.x_of(marquee.from.max(marquee.to));
+    let fill = iced::Color {
+        a: MARQUEE_ALPHA,
+        ..iced::Color::from(palette.accent)
+    };
+    let border = iced::Color::from(palette.accent);
+    frame.fill_rectangle(Point::new(left, 0.0), Size::new(right - left, height), fill);
+    frame.fill_rectangle(Point::new(left, 0.0), Size::new(1.0, height), border);
+    frame.fill_rectangle(Point::new(right, 0.0), Size::new(1.0, height), border);
 }
 
 fn draw_waveform(frame: &mut Frame, area: Rectangle, columns: &[WaveColumn], palette: Palette) {
@@ -205,17 +328,20 @@ impl Viewport {
 
 #[cfg(test)]
 mod tests {
-    use iced::{Point, Size};
-    use sibilant_core::project::{AudioSource, Clip, Ids, Project, Region, Track};
-    use sibilant_core::time::{Duration, Musical, Position, Tempo, TempoMap};
-
-    use crate::pixels::Pixels;
-    use crate::theme::Palette;
+    use std::collections::BTreeSet;
     use std::sync::Arc;
 
+    use iced::keyboard::{self, Modifiers};
+    use iced::{Event, Point, Size, mouse};
+    use iced_test::simulator;
+    use sibilant_core::project::{AudioSource, Clip, ClipKey, Ids, Project, Region, Track};
+    use sibilant_core::time::{Duration, Musical, Position, Tempo, TempoMap};
     use sibilant_media::{Audio, Peaks};
 
-    use crate::timeline::{View, Viewport, Waveforms, lane};
+    use crate::command::Command;
+    use crate::pixels::Pixels;
+    use crate::theme::Palette;
+    use crate::timeline::{Grip, Marquee, Pointer, View, Viewport, Waveforms, lane};
 
     fn quarter_notes(quarter_notes: i64) -> Position<Musical> {
         Position::from_quarter_notes(quarter_notes)
@@ -321,6 +447,182 @@ mod tests {
         let lane = lane(View::default(), &project, first_track(&project), palette);
         let pixels = Pixels::render_pointing(lane, Size::new(400.0, 64.0), Point::new(40.0, 32.0));
         assert_eq!(pixels.color_at(33, 10), palette.background);
+    }
+
+    fn one_clip() -> (Project, ClipKey) {
+        let project = project_with_clips(&[4], 2, TempoMap::default());
+        let key = ClipKey {
+            track: first_track(&project).id(),
+            start: quarter_notes(4),
+        };
+        (project, key)
+    }
+
+    fn pointer_events(view: View<'_>, project: &Project, events: Vec<Event>) -> Vec<Command> {
+        let lane = lane(view, project, first_track(project), Palette::GRAPHITE);
+        let mut ui = simulator(lane);
+        ui.simulate(events);
+        ui.into_messages().collect()
+    }
+
+    fn press_at(project: &Project, x: f32, modifiers: Modifiers) -> Vec<Command> {
+        let lane = lane(
+            View::default(),
+            project,
+            first_track(project),
+            Palette::GRAPHITE,
+        );
+        let mut ui = simulator(lane);
+        ui.point_at(Point::new(x, 32.0));
+        ui.simulate([
+            Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)),
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+        ]);
+        ui.into_messages().collect()
+    }
+
+    fn grip_at(project: &Project, x: f32) -> Option<(ClipKey, Grip)> {
+        match press_at(project, x, Modifiers::empty())[..] {
+            [Command::Pointer(Pointer::Pressed { grip, .. })] => grip,
+            _ => panic!("the press gave no pointer event"),
+        }
+    }
+
+    #[test]
+    fn a_press_on_a_clip_names_the_clip_and_the_position() {
+        let (project, key) = one_clip();
+        assert_eq!(
+            press_at(&project, 190.0, Modifiers::empty()),
+            [Command::Pointer(Pointer::Pressed {
+                track: key.track,
+                at: Viewport::default().position_at(190.0),
+                grip: Some((key, Grip::Body)),
+                toggle: false,
+                free: false,
+            })]
+        );
+    }
+
+    #[test]
+    fn a_press_near_an_edge_of_a_clip_names_the_edge() {
+        let (project, key) = one_clip();
+        assert_eq!(grip_at(&project, 130.0), Some((key, Grip::Start)));
+        assert_eq!(grip_at(&project, 253.0), Some((key, Grip::End)));
+    }
+
+    #[test]
+    fn a_press_on_empty_space_names_no_clip() {
+        let (project, _) = one_clip();
+        assert_eq!(grip_at(&project, 50.0), None);
+    }
+
+    #[test]
+    fn a_press_tells_if_ctrl_and_alt_are_down() {
+        let (project, _) = one_clip();
+        let pressed = press_at(&project, 50.0, Modifiers::COMMAND | Modifiers::ALT);
+        assert!(matches!(
+            pressed[..],
+            [Command::Pointer(Pointer::Pressed {
+                toggle: true,
+                free: true,
+                ..
+            })]
+        ));
+    }
+
+    fn move_and_release(x: f32) -> Vec<Event> {
+        vec![
+            Event::Mouse(mouse::Event::CursorMoved {
+                position: Point::new(x, 32.0),
+            }),
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+        ]
+    }
+
+    #[test]
+    fn while_pointing_the_lane_reports_each_move_and_the_release() {
+        let (project, key) = one_clip();
+        let view = View {
+            pointing: true,
+            ..View::default()
+        };
+        let at = Viewport::default().position_at(64.0);
+        let lane = lane(view, &project, first_track(&project), Palette::GRAPHITE);
+        let mut ui = simulator(lane);
+        ui.point_at(Point::new(64.0, 32.0));
+        ui.simulate(move_and_release(64.0));
+        let messages: Vec<_> = ui.into_messages().collect();
+        assert_eq!(
+            messages,
+            [
+                Command::Pointer(Pointer::Moved {
+                    track: key.track,
+                    at,
+                    free: false
+                }),
+                Command::Pointer(Pointer::Released {
+                    track: key.track,
+                    at,
+                    free: false
+                })
+            ]
+        );
+    }
+
+    #[test]
+    fn without_pointing_the_lane_reports_no_moves_and_no_release() {
+        let (project, _) = one_clip();
+        assert_eq!(
+            pointer_events(View::default(), &project, move_and_release(64.0)),
+            []
+        );
+    }
+
+    #[test]
+    fn a_selected_clip_has_an_outline() {
+        let (project, key) = one_clip();
+        let palette = Palette::GRAPHITE;
+        let clip = palette.track_color(first_track(&project).color());
+        let selection = BTreeSet::from([key]);
+        let selected = View {
+            selection: &selection,
+            ..View::default()
+        };
+        let size = Size::new(400.0, 64.0);
+        let outlined = Pixels::render(
+            lane(selected, &project, first_track(&project), palette),
+            size,
+        );
+        let plain = Pixels::render(
+            lane(View::default(), &project, first_track(&project), palette),
+            size,
+        );
+        assert_eq!(outlined.color_at(190, 3), palette.text);
+        assert_eq!(outlined.color_at(190, 10), clip);
+        assert_eq!(plain.color_at(190, 3), clip);
+    }
+
+    #[test]
+    fn the_box_covers_its_span_on_each_track_inside_it() {
+        let palette = Palette::GRAPHITE;
+        let project = Project::new(&mut Ids::default());
+        let tracks: Vec<_> = project.tracks().collect();
+        let marquee = Marquee {
+            from: quarter_notes(3),
+            to: quarter_notes(1),
+            tracks: (tracks[0].id(), tracks[0].id()),
+        };
+        let view = View {
+            marquee: Some(marquee),
+            ..View::default()
+        };
+        let size = Size::new(400.0, 64.0);
+        let inside = Pixels::render(lane(view, &project, tracks[0], palette), size);
+        let outside = Pixels::render(lane(view, &project, tracks[1], palette), size);
+        assert_eq!(inside.color_at(32, 20), palette.accent);
+        assert_ne!(inside.color_at(48, 20), palette.background);
+        assert_eq!(inside.color_at(150, 20), palette.background);
+        assert_eq!(outside.color_at(48, 20), palette.background);
     }
 
     #[test]

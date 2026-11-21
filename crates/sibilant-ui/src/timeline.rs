@@ -4,13 +4,13 @@ mod lane;
 mod ruler;
 mod waveform;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use iced::keyboard::{self, Modifiers};
 use iced::widget::canvas::{Action, Event, Frame};
 use iced::{Point, Rectangle, Size, mouse};
-use sibilant_core::project::SourceId;
+use sibilant_core::project::{ClipKey, SourceId, TrackId};
 use sibilant_core::time::{Duration, Musical, Position, TICKS_PER_QUARTER_NOTE, TimeSignatureMap};
 use sibilant_media::Peaks;
 
@@ -46,6 +46,42 @@ fn wheel(
 pub type Waveforms = BTreeMap<SourceId, Arc<Peaks>>;
 
 static NO_WAVEFORMS: Waveforms = BTreeMap::new();
+static NO_SELECTION: BTreeSet<ClipKey> = BTreeSet::new();
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Grip {
+    Body,
+    Start,
+    End,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Pointer {
+    Pressed {
+        track: TrackId,
+        at: Position<Musical>,
+        grip: Option<(ClipKey, Grip)>,
+        toggle: bool,
+        free: bool,
+    },
+    Moved {
+        track: TrackId,
+        at: Position<Musical>,
+        free: bool,
+    },
+    Released {
+        track: TrackId,
+        at: Position<Musical>,
+        free: bool,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Marquee {
+    pub from: Position<Musical>,
+    pub to: Position<Musical>,
+    pub tracks: (TrackId, TrackId),
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct View<'a> {
@@ -54,6 +90,9 @@ pub struct View<'a> {
     pub play_start: Position<Musical>,
     pub waveforms: &'a Waveforms,
     pub dragging: bool,
+    pub selection: &'a BTreeSet<ClipKey>,
+    pub marquee: Option<Marquee>,
+    pub pointing: bool,
 }
 
 impl Default for View<'_> {
@@ -64,6 +103,9 @@ impl Default for View<'_> {
             play_start: Position::START,
             waveforms: &NO_WAVEFORMS,
             dragging: false,
+            selection: &NO_SELECTION,
+            marquee: None,
+            pointing: false,
         }
     }
 }

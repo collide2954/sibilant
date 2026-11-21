@@ -3,6 +3,8 @@ use iced::mouse::ScrollDelta;
 use sibilant_core::project::TrackId;
 use sibilant_core::time::{Musical, Position};
 
+use crate::timeline::Pointer;
+
 const WHEEL_LINE: f32 = 48.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -19,6 +21,7 @@ pub enum Command {
     New,
     Open,
     PlayOrStop,
+    Pointer(Pointer),
     Redo,
     Save,
     SaveAs,

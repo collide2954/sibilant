@@ -166,6 +166,8 @@ impl App {
         self.pool.clear();
         self.waveforms.clear();
         self.missing.clear();
+        self.selection.clear();
+        self.gesture = None;
         self.browser.set_notice(None);
         self.send(engine::Command::Stop);
         self.locate(Position::START);
