@@ -16,6 +16,7 @@ use sibilant_project::Opened;
 use sibilant_ui::browser::{self, Browser, Request};
 use sibilant_ui::command::Command;
 use sibilant_ui::dialog::{self, Choice};
+use sibilant_ui::menu;
 use sibilant_ui::theme::Palette;
 use sibilant_ui::timeline::{View, Viewport, Waveforms};
 use sibilant_ui::transport::{self, Display};
@@ -56,6 +57,7 @@ pub(crate) enum Message {
     SourceLoaded(DocumentId, SourceId, Result<LoadedAudio, String>),
     Unsaved(Choice),
     CloseRequested(window::Id),
+    Menu(menu::Event),
     DragEnded,
     Frame,
 }
@@ -77,8 +79,14 @@ pub(crate) struct App {
     metronome: bool,
     playing: bool,
     saving: bool,
-    asking: Option<Leave>,
+    overlay: Option<Overlay>,
     waiting: Option<Leave>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Overlay {
+    FileMenu,
+    Unsaved(Leave),
 }
 
 impl Default for App {
@@ -101,7 +109,7 @@ impl Default for App {
             metronome: false,
             playing: false,
             saving: false,
-            asking: None,
+            overlay: None,
             waiting: None,
         }
     }
@@ -151,6 +159,7 @@ impl App {
             }
             Message::Unsaved(choice) => return self.answer(choice),
             Message::CloseRequested(window) => return self.leave(Leave::Close(window)),
+            Message::Menu(event) => return self.use_menu(event),
             Message::DragEnded => self.dragging = None,
             Message::Frame => {
                 if let Some(audio) = self.audio.as_mut() {
@@ -274,7 +283,7 @@ impl App {
     }
 
     fn run(&mut self, command: Command) -> Task<Message> {
-        if self.asking.is_some() {
+        if let Some(Overlay::Unsaved(_)) = self.overlay {
             return self.answer_by_key(command);
         }
         match command {
@@ -313,8 +322,22 @@ impl App {
             Command::Open => return self.leave(Leave::Open),
             Command::Save => return self.save(),
             Command::SaveAs => return self.save_as(),
+            Command::Cancel if self.overlay == Some(Overlay::FileMenu) => self.overlay = None,
             Command::Cancel => self.stop_preview(),
             Command::Confirm => {}
+        }
+        Task::none()
+    }
+
+    fn use_menu(&mut self, event: menu::Event) -> Task<Message> {
+        match event {
+            menu::Event::Toggle if self.overlay == Some(Overlay::FileMenu) => self.overlay = None,
+            menu::Event::Toggle => self.overlay = Some(Overlay::FileMenu),
+            menu::Event::Close => self.overlay = None,
+            menu::Event::Choose(command) => {
+                self.overlay = None;
+                return self.run(command);
+            }
         }
         Task::none()
     }
@@ -352,13 +375,21 @@ impl App {
             dragging: self.dragging.is_some(),
         };
         let tracks = track_area::view(project, timeline, self.palette).map(Message::Command);
-        let window = shell::view(self.palette, transport, browser, tracks);
-        if self.asking.is_none() {
-            return window;
+        let open = self.overlay == Some(Overlay::FileMenu);
+        let file = menu::file_button(open, self.palette).map(Message::Menu);
+        let window = shell::view(self.palette, file, transport, browser, tracks);
+        match self.overlay {
+            None => window,
+            Some(Overlay::FileMenu) => {
+                let items = menu::file_menu(self.palette).map(Message::Menu);
+                shell::with_menu(window, items, Message::Menu(menu::Event::Close))
+            }
+            Some(Overlay::Unsaved(_)) => {
+                let question = dialog::unsaved_changes(&self.document.name(), self.palette)
+                    .map(Message::Unsaved);
+                dialog::modal(window, question, self.palette)
+            }
         }
-        let question =
-            dialog::unsaved_changes(&self.document.name(), self.palette).map(Message::Unsaved);
-        dialog::modal(window, question, self.palette)
     }
 
     pub(crate) fn title(&self) -> String {
@@ -420,6 +451,7 @@ mod tests {
     use sibilant_ui::command::Command;
     use sibilant_ui::dialog::Choice;
     use sibilant_ui::icons::Icon;
+    use sibilant_ui::menu;
     use sibilant_ui::theme::Palette;
     use sibilant_ui::timeline::Viewport;
 
@@ -1439,8 +1471,62 @@ mod tests {
     fn the_app_shows_the_zones_of_the_main_window() {
         let app = App::default();
         let mut ui = simulator(app.view());
-        for zone in ["1.1.1", "Browser", "Audio 1", "Inspector", "Mixer"] {
+        for zone in ["File", "1.1.1", "Browser", "Audio 1", "Inspector", "Mixer"] {
             assert!(ui.find(zone).is_ok(), "{zone}");
         }
+    }
+
+    fn shows_the_file_menu(app: &App) -> bool {
+        simulator(app.view()).find("Save As…").is_ok()
+    }
+
+    fn use_menu(app: &mut App, event: menu::Event) -> Task<Message> {
+        app.update(Message::Menu(event))
+    }
+
+    #[test]
+    fn the_file_button_opens_and_closes_the_file_menu() {
+        let mut app = App::default();
+        let _ = use_menu(&mut app, menu::Event::Toggle);
+        assert!(shows_the_file_menu(&app));
+        let _ = use_menu(&mut app, menu::Event::Toggle);
+        assert!(!shows_the_file_menu(&app));
+    }
+
+    #[test]
+    fn an_item_of_the_file_menu_closes_the_menu_and_runs_its_command() {
+        let mut app = App::default();
+        let _ = use_menu(&mut app, menu::Event::Toggle);
+        let dialog = use_menu(&mut app, menu::Event::Choose(Command::SaveAs));
+        assert_eq!(dialog.units(), 1);
+        assert!(!shows_the_file_menu(&app));
+    }
+
+    #[test]
+    fn the_save_question_closes_the_file_menu() {
+        let mut app = with_unsaved_changes();
+        let _ = use_menu(&mut app, menu::Event::Toggle);
+        let _ = app.update(Message::CloseRequested(iced::window::Id::unique()));
+        assert!(asks_to_save(&app, "Untitled"));
+        assert!(!shows_the_file_menu(&app));
+    }
+
+    #[test]
+    fn a_click_beside_the_file_menu_closes_it() {
+        let mut app = App::default();
+        let _ = use_menu(&mut app, menu::Event::Toggle);
+        let _ = use_menu(&mut app, menu::Event::Close);
+        assert!(!shows_the_file_menu(&app));
+    }
+
+    #[test]
+    fn escape_closes_the_file_menu_before_it_stops_a_preview() {
+        let (mut app, mut engine) = with_simulated_audio();
+        hear_kick(&mut app, 48_000);
+        let _ = render(&mut engine, 480);
+        let _ = use_menu(&mut app, menu::Event::Toggle);
+        run(&mut app, Command::Cancel);
+        assert!(!shows_the_file_menu(&app));
+        assert!(loudest(&render(&mut engine, 480)) > 0.2);
     }
 }

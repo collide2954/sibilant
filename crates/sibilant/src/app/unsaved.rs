@@ -2,7 +2,7 @@ use iced::{Task, window};
 use sibilant_ui::command::Command;
 use sibilant_ui::dialog::Choice;
 
-use super::{App, Message, dialogs};
+use super::{App, Message, Overlay, dialogs};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Leave {
@@ -17,7 +17,7 @@ impl App {
             self.waiting = Some(leave);
             Task::none()
         } else if self.document.is_changed(self.history.present()) {
-            self.asking = Some(leave);
+            self.overlay = Some(Overlay::Unsaved(leave));
             Task::none()
         } else {
             self.go(leave)
@@ -25,9 +25,10 @@ impl App {
     }
 
     pub(super) fn answer(&mut self, choice: Choice) -> Task<Message> {
-        let Some(leave) = self.asking.take() else {
+        let Some(Overlay::Unsaved(leave)) = self.overlay else {
             return Task::none();
         };
+        self.overlay = None;
         match choice {
             Choice::Save => {
                 self.waiting = Some(leave);
