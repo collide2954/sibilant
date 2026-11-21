@@ -28,6 +28,10 @@ Record 0008 gives a project folder with the name `MySong.sibilant` and a file `p
 - Save As makes a new project folder with the name that the user gives. If the user selects a project file in a folder with the same name, Sibilant saves into that folder. Sibilant does not replace a different project with the same name. It shows an error.
 - Save does the same as Save As for a project that has no project file yet.
 - A dialog in the Sibilant window asks "Save", "Don't Save", or "Cancel" before Sibilant removes changes that are not saved. This occurs before a new project, before Open, and before the window closes.
+  - The buttons have the order of each operating system. On Windows, the order is Save, Don't Save, and Cancel, at the right side. On macOS and Linux, Don't Save is at the left side, and Cancel and Save are at the right side.
+  - The Enter key gives Save, and the Esc key gives Cancel. Don't Save has no key. Thus one key cannot remove changes by accident.
+  - Save saves the project, and then Sibilant continues. If the save fails, or if the user closes the Save As dialog, Sibilant stays in the project.
+  - If a save has not ended, Sibilant waits until it ends. Then it makes the new project, starts Open, or closes the window.
 - The window title shows the name of the project. When the project has changes that are not saved, a dot (●) is in front of the name.
 - Sibilant starts with a new project, as before.
 - When an audio file of a project is missing, the project opens. The clips of the file stay in their positions, but they are silent and show no waveform. A notice in the browser gives the names of the missing files.
@@ -48,3 +52,4 @@ Record 0008 gives a project folder with the name `MySong.sibilant` and a file `p
 - Dialogs in the Sibilant window: the same on all systems, but without the recent folders, the favorites, and the cloud drives of the system dialogs.
 - A message box of the operating system for unsaved changes: a native dialog, but on Linux it needs zenity, and on Windows the button names need a manifest.
 - Save without a question: no dialog, but users cannot discard changes that they do not want.
+- One order of the buttons on all systems: one layout, but on Windows the layout is different from the other applications.
