@@ -158,17 +158,31 @@ fn read_orphan(folder: PathBuf) -> Orphan {
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default();
+    let project = note.project.map(Location::of_file);
     Orphan {
-        project: note.project.map(Location::of_file),
-        copy: note.copy.filter(|copy| copy.exists()),
+        copy: note
+            .copy
+            .filter(|copy| is_newer_than_the_project(copy, project.as_ref())),
+        project,
         folder: SessionFolder(folder),
     }
+}
+
+fn is_newer_than_the_project(copy: &Path, project: Option<&Location>) -> bool {
+    let modified = |file: &Path| fs::metadata(file).and_then(|file| file.modified()).ok();
+    let Some(copied) = modified(copy) else {
+        return false;
+    };
+    project
+        .and_then(|location| modified(location.file()))
+        .is_none_or(|saved| copied > saved)
 }
 
 #[cfg(test)]
 mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::time::{Duration as Interval, UNIX_EPOCH};
 
     use sibilant_core::project::{AudioSource, Project, SourceId};
     use sibilant_core::time::Duration;
@@ -222,6 +236,32 @@ mod tests {
         assert_eq!(found[0].copy(), Some(copy.as_path()));
         assert_eq!(found[0].project(), Some(&location));
         assert_eq!(found[0].location(), location);
+    }
+
+    fn set_modified(file: &Path, seconds: u64) {
+        let file = fs::File::options().write(true).open(file).unwrap();
+        file.set_modified(UNIX_EPOCH + Interval::from_secs(seconds))
+            .unwrap();
+    }
+
+    fn orphan_copy_with_times(copied: u64, saved: u64) -> Option<PathBuf> {
+        let scratch = Scratch::new();
+        let location = my_song(&scratch);
+        let copy = scratch.file("MySong/autosave/MySong 7.sibilant", b"{}");
+        scratch.file("MySong/MySong.sibilant", b"{}");
+        set_modified(&copy, copied);
+        set_modified(location.file(), saved);
+        let root = scratch.path().join("Recovery");
+        let session = Session::start(&root).unwrap();
+        session.folder().note(Some(&location), Some(&copy)).unwrap();
+        drop(session);
+        orphans(&root)[0].copy().map(Path::to_path_buf)
+    }
+
+    #[test]
+    fn only_a_copy_newer_than_the_project_file_has_something_to_restore() {
+        assert!(orphan_copy_with_times(1_795_100_200, 1_795_100_100).is_some());
+        assert_eq!(orphan_copy_with_times(1_795_100_100, 1_795_100_200), None);
     }
 
     #[test]
