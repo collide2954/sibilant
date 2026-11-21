@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use sibilant_core::project::{ClipKey, EditError, Edited, Project, Track, TrackId};
+use sibilant_core::project::{ClipKey, Edge, EditError, Edited, Project, Track, TrackId};
 use sibilant_core::time::{Musical, Position};
 use sibilant_ui::timeline::{Grip, Marquee, Pointer};
 
@@ -187,7 +187,7 @@ impl App {
     fn grabbed_edit(&self) -> Option<Edited> {
         let Some(Gesture::Grab {
             clip,
-            grip: Grip::Body,
+            grip,
             from,
             to,
             free,
@@ -198,10 +198,22 @@ impl App {
         if !self.moved(from, to) {
             return None;
         }
-        let offset = self.snapped(clip.start + (to.at - from.at), free) - clip.start;
-        let rows = self.rows_between(from.track, to.track)?;
-        let clips: Vec<ClipKey> = self.selection.iter().copied().collect();
-        self.history.present().move_clips(&clips, offset, rows).ok()
+        let project = self.history.present();
+        let (edge, position) = match grip {
+            Grip::Body => {
+                let offset = self.snapped(clip.start + (to.at - from.at), free) - clip.start;
+                let rows = self.rows_between(from.track, to.track)?;
+                let clips: Vec<ClipKey> = self.selection.iter().copied().collect();
+                return project.move_clips(&clips, offset, rows).ok();
+            }
+            Grip::Start => (Edge::Start, clip.start),
+            Grip::End => (
+                Edge::End,
+                project.clip_end(clip.start, project.clip(clip).ok()?),
+            ),
+        };
+        let edge_to = self.snapped(position + (to.at - from.at), free);
+        project.trim_clip(clip, edge, edge_to).ok()
     }
 
     fn snapped(&self, position: Position<Musical>, free: bool) -> Position<Musical> {
@@ -266,7 +278,7 @@ mod tests {
     use sibilant_core::project::{
         AudioSource, Clip, ClipKey, Ids, Project, Region, Track, TrackId,
     };
-    use sibilant_core::time::{Duration, Position};
+    use sibilant_core::time::{Clock, Duration, Position};
     use sibilant_ui::command::Command;
     use sibilant_ui::timeline::{Grip, Marquee, Pointer};
 
@@ -767,6 +779,111 @@ mod tests {
         drag_ticks(&mut app, tracks[0], 3 * QUARTER, false);
         let _ = app.update(Message::DragEnded);
         assert_eq!(start_ticks(&app, tracks[0]), [2 * QUARTER]);
+    }
+
+    fn region(app: &App, clip: ClipKey) -> (Duration<Clock>, Duration<Clock>) {
+        let region = app.history.present().clip(clip).unwrap().region();
+        (region.start, region.length)
+    }
+
+    fn milliseconds(milliseconds: i64) -> Duration<Clock> {
+        Duration::from_superclocks(milliseconds * 282_240)
+    }
+
+    #[test]
+    fn a_drag_on_the_start_edge_trims_the_start_to_the_grid() {
+        let (mut app, tracks) = with_clips(&[(0, 0)]);
+        grab(
+            &mut app,
+            key(tracks[0], 0),
+            Grip::Start,
+            tracks[0],
+            0,
+            false,
+        );
+        drop_ticks(&mut app, tracks[0], 6 * QUARTER / 10, false);
+        assert_eq!(start_ticks(&app, tracks[0]), [QUARTER]);
+        assert_eq!(
+            region(&app, key(tracks[0], 1)),
+            (milliseconds(500), milliseconds(500))
+        );
+        assert_eq!(selected(&app), [key(tracks[0], 1)]);
+    }
+
+    #[test]
+    fn a_drag_on_the_end_edge_trims_the_end_to_the_grid() {
+        let (mut app, tracks) = with_clips(&[(0, 0)]);
+        grab(
+            &mut app,
+            key(tracks[0], 0),
+            Grip::End,
+            tracks[0],
+            2 * QUARTER,
+            false,
+        );
+        drop_ticks(&mut app, tracks[0], 14 * QUARTER / 10, false);
+        assert_eq!(
+            region(&app, key(tracks[0], 0)),
+            (Duration::ZERO, milliseconds(500))
+        );
+    }
+
+    #[test]
+    fn the_end_grows_only_until_the_end_of_the_audio() {
+        let (mut app, tracks) = with_clips(&[(0, 0)]);
+        grab(
+            &mut app,
+            key(tracks[0], 0),
+            Grip::End,
+            tracks[0],
+            2 * QUARTER,
+            false,
+        );
+        drop_ticks(&mut app, tracks[0], 30 * QUARTER, false);
+        assert_eq!(
+            region(&app, key(tracks[0], 0)),
+            (Duration::ZERO, Duration::from_seconds(10))
+        );
+    }
+
+    #[test]
+    fn with_alt_a_trim_does_not_snap() {
+        let (mut app, tracks) = with_clips(&[(0, 0)]);
+        grab(
+            &mut app,
+            key(tracks[0], 0),
+            Grip::End,
+            tracks[0],
+            2 * QUARTER,
+            true,
+        );
+        drop_ticks(&mut app, tracks[0], 14 * QUARTER / 10, true);
+        assert_eq!(
+            region(&app, key(tracks[0], 0)),
+            (Duration::ZERO, milliseconds(700))
+        );
+    }
+
+    #[test]
+    fn a_trim_selects_only_the_trimmed_clip_and_is_one_undo_step() {
+        let (mut app, tracks) = with_clips(&[(0, 0), (0, 4)]);
+        click(&mut app, key(tracks[0], 4), false);
+        grab(
+            &mut app,
+            key(tracks[0], 0),
+            Grip::End,
+            tracks[0],
+            2 * QUARTER,
+            false,
+        );
+        drop_ticks(&mut app, tracks[0], QUARTER, false);
+        assert_eq!(selected(&app), [key(tracks[0], 0)]);
+        run(&mut app, Command::Undo);
+        assert_eq!(
+            region(&app, key(tracks[0], 0)),
+            (Duration::ZERO, milliseconds(1_000))
+        );
+        assert!(!app.history.can_undo());
     }
 
     #[test]

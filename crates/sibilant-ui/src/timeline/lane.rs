@@ -49,7 +49,17 @@ impl canvas::Program<Command> for Lane<'_> {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> mouse::Interaction {
-        drag_interaction(self.view, bounds, cursor)
+        let on_edge = cursor.position_in(bounds).is_some_and(|position| {
+            matches!(
+                self.grip_at(position.x, bounds.width),
+                Some((_, Grip::Start | Grip::End))
+            )
+        });
+        if on_edge && !self.view.dragging {
+            mouse::Interaction::ResizingHorizontally
+        } else {
+            drag_interaction(self.view, bounds, cursor)
+        }
     }
 
     fn draw(
@@ -332,7 +342,8 @@ mod tests {
     use std::sync::Arc;
 
     use iced::keyboard::{self, Modifiers};
-    use iced::{Event, Point, Size, mouse};
+    use iced::widget::canvas;
+    use iced::{Event, Point, Rectangle, Size, mouse};
     use iced_test::simulator;
     use sibilant_core::project::{AudioSource, Clip, ClipKey, Ids, Project, Region, Track};
     use sibilant_core::time::{Duration, Musical, Position, Tempo, TempoMap};
@@ -341,6 +352,7 @@ mod tests {
     use crate::command::Command;
     use crate::pixels::Pixels;
     use crate::theme::Palette;
+    use crate::timeline::lane::Lane;
     use crate::timeline::{Grip, Marquee, Pointer, View, Viewport, Waveforms, lane};
 
     fn quarter_notes(quarter_notes: i64) -> Position<Musical> {
@@ -575,6 +587,38 @@ mod tests {
         assert_eq!(
             pointer_events(View::default(), &project, move_and_release(64.0)),
             []
+        );
+    }
+
+    fn cursor_at(view: View<'_>, project: &Project, x: f32) -> mouse::Interaction {
+        let lane = Lane {
+            view,
+            project,
+            track: first_track(project),
+            palette: Palette::GRAPHITE,
+        };
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(400.0, 64.0));
+        let cursor = mouse::Cursor::Available(Point::new(x, 32.0));
+        canvas::Program::mouse_interaction(&lane, &Modifiers::empty(), bounds, cursor)
+    }
+
+    #[test]
+    fn the_edges_of_a_clip_show_a_resize_cursor() {
+        let (project, _) = one_clip();
+        let resize = mouse::Interaction::ResizingHorizontally;
+        assert_eq!(cursor_at(View::default(), &project, 130.0), resize);
+        assert_eq!(cursor_at(View::default(), &project, 253.0), resize);
+        assert_eq!(
+            cursor_at(View::default(), &project, 190.0),
+            mouse::Interaction::default()
+        );
+        let dragging = View {
+            dragging: true,
+            ..View::default()
+        };
+        assert_eq!(
+            cursor_at(dragging, &project, 130.0),
+            mouse::Interaction::Grabbing
         );
     }
 
