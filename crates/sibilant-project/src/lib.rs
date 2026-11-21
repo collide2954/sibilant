@@ -11,4 +11,4 @@ pub use autosave::{Autosaved, autosave, restore};
 pub use location::{EXTENSION, Location};
 pub use open::{OpenError, Opened, open};
 pub use save::{Copies, SaveError, save};
-pub use session::{Orphan, Session, orphans};
+pub use session::{Orphan, Session, SessionFolder, orphans};

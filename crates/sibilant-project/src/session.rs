@@ -15,9 +15,12 @@ const UNTITLED: &str = "Untitled";
 
 #[derive(Debug)]
 pub struct Session {
-    folder: PathBuf,
+    folder: SessionFolder,
     _lock: File,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionFolder(PathBuf);
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct Note {
@@ -50,17 +53,32 @@ impl Session {
             .open(folder.join(LOCK))?;
         lock.try_lock()?;
         Ok(Self {
-            folder,
+            folder: SessionFolder(folder),
             _lock: lock,
         })
     }
 
-    pub fn folder(&self) -> &Path {
+    pub fn folder(&self) -> &SessionFolder {
         &self.folder
     }
 
+    pub fn end(self) -> io::Result<()> {
+        let Self {
+            folder,
+            _lock: lock,
+        } = self;
+        drop(lock);
+        fs::remove_dir_all(folder.0)
+    }
+}
+
+impl SessionFolder {
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+
     pub fn untitled(&self) -> Location {
-        untitled_in(&self.folder)
+        Location::of_file(self.0.join(format!("{UNTITLED}.{EXTENSION}")))
     }
 
     pub fn note(&self, project: Option<&Location>, copy: Option<&Path>) -> io::Result<()> {
@@ -69,9 +87,7 @@ impl Session {
             copy: copy.map(Path::to_path_buf),
         };
         let text = serde_json::to_string_pretty(&note).map_err(io::Error::other)?;
-        write_through_temporary(&self.folder.join(NOTE), |temporary| {
-            fs::write(temporary, &text)
-        })
+        write_through_temporary(&self.0.join(NOTE), |temporary| fs::write(temporary, &text))
     }
 
     pub fn clear_untitled(&self) -> io::Result<()> {
@@ -84,20 +100,11 @@ impl Session {
         }
         Ok(())
     }
-
-    pub fn end(self) -> io::Result<()> {
-        let Self {
-            folder,
-            _lock: lock,
-        } = self;
-        drop(lock);
-        fs::remove_dir_all(folder)
-    }
 }
 
 #[derive(Debug)]
 pub struct Orphan {
-    folder: PathBuf,
+    folder: SessionFolder,
     project: Option<Location>,
     copy: Option<PathBuf>,
 }
@@ -114,15 +121,15 @@ impl Orphan {
     pub fn location(&self) -> Location {
         self.project
             .clone()
-            .unwrap_or_else(|| untitled_in(&self.folder))
+            .unwrap_or_else(|| self.folder.untitled())
     }
 
     pub fn adopt(self) -> io::Result<Session> {
-        Session::lock(self.folder)
+        Session::lock(self.folder.0)
     }
 
     pub fn discard(self) -> io::Result<()> {
-        fs::remove_dir_all(self.folder)
+        fs::remove_dir_all(self.folder.0)
     }
 }
 
@@ -154,12 +161,8 @@ fn read_orphan(folder: PathBuf) -> Orphan {
     Orphan {
         project: note.project.map(Location::of_file),
         copy: note.copy.filter(|copy| copy.exists()),
-        folder,
+        folder: SessionFolder(folder),
     }
-}
-
-fn untitled_in(folder: &Path) -> Location {
-    Location::of_file(folder.join(format!("{UNTITLED}.{EXTENSION}")))
 }
 
 #[cfg(test)]
@@ -167,7 +170,8 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
 
-    use sibilant_core::project::Project;
+    use sibilant_core::project::{AudioSource, Project, SourceId};
+    use sibilant_core::time::Duration;
 
     use crate::scratch::Scratch;
     use crate::{Copies, Location, Session, autosave, orphans};
@@ -211,7 +215,7 @@ mod tests {
         let copy = scratch.file("MySong/autosave/MySong 7.sibilant", b"{}");
         let root = scratch.path().join("Recovery");
         let session = Session::start(&root).unwrap();
-        session.note(Some(&location), Some(&copy)).unwrap();
+        session.folder().note(Some(&location), Some(&copy)).unwrap();
         drop(session);
         let found = orphans(&root);
         assert_eq!(found.len(), 1);
@@ -226,7 +230,7 @@ mod tests {
         let location = my_song(&scratch);
         let session = Session::start(scratch.path()).unwrap();
         let gone = location.autosave().join("MySong 7.sibilant");
-        session.note(Some(&location), Some(&gone)).unwrap();
+        session.folder().note(Some(&location), Some(&gone)).unwrap();
         drop(session);
         assert_eq!(orphans(scratch.path())[0].copy(), None);
     }
@@ -252,9 +256,10 @@ mod tests {
     fn an_untitled_project_restores_from_the_folder_of_its_session() {
         let scratch = Scratch::new();
         let session = Session::start(scratch.path()).unwrap();
-        let untitled = session.untitled();
-        assert_eq!(untitled.folder(), session.folder());
+        let untitled = session.folder().untitled();
+        assert_eq!(untitled.folder(), session.folder().path());
         session
+            .folder()
             .note(None, Some(&untitled.autosave().join("Untitled 7.sibilant")))
             .unwrap();
         drop(session);
@@ -270,7 +275,7 @@ mod tests {
         let orphan = orphans(scratch.path()).remove(0);
         let folder = orphan.location().folder().to_path_buf();
         let session = orphan.adopt().unwrap();
-        assert_eq!(session.folder(), folder);
+        assert_eq!(session.folder().path(), folder);
         assert!(orphans(scratch.path()).is_empty());
     }
 
@@ -288,17 +293,13 @@ mod tests {
         let kick = scratch.file("samples/Kick.wav", b"kick");
         let root = scratch.path().join("Recovery");
         let session = Session::start(&root).unwrap();
-        let untitled = session.untitled();
-        let source = sibilant_core::project::AudioSource::new(
-            sibilant_core::project::SourceId::new(1),
-            &kick,
-            sibilant_core::time::Duration::from_seconds(1),
-        );
+        let untitled = session.folder().untitled();
+        let source = AudioSource::new(SourceId::new(1), &kick, Duration::from_seconds(1));
         let project = Project::default().add_source(source).unwrap();
         autosave(&project, &untitled, &Copies::default(), 7).unwrap();
-        session.clear_untitled().unwrap();
+        session.folder().clear_untitled().unwrap();
         assert!(!untitled.audio().exists());
         assert!(!untitled.autosave().exists());
-        assert!(session.folder().exists());
+        assert!(session.folder().path().exists());
     }
 }
