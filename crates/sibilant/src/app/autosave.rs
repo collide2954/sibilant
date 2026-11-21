@@ -161,9 +161,8 @@ impl App {
     }
 
     fn autosave_failed(&mut self, error: &str) {
-        self.browser.set_notice(Some(format!(
-            "Sibilant did not write a recovery copy: {error}"
-        )));
+        self.browser
+            .show_problem(format!("Sibilant did not write a recovery copy: {error}"));
     }
 }
 

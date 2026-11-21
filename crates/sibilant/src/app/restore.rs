@@ -73,16 +73,15 @@ impl App {
             Ok(project) => {
                 self.start_document(project, Document::restored(orphan.project().cloned()));
                 if let Err(error) = self.recovery.adopt(orphan) {
-                    self.browser.set_notice(Some(format!(
+                    self.browser.show_problem(format!(
                         "Sibilant did not take over the recovery folder: {error}"
-                    )));
+                    ));
                 }
                 self.load_sources()
             }
             Err(error) => {
-                self.browser.set_notice(Some(format!(
-                    "Sibilant did not restore the project: {error}"
-                )));
+                self.browser
+                    .show_problem(format!("Sibilant did not restore the project: {error}"));
                 Task::none()
             }
         }

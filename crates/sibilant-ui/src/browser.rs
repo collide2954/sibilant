@@ -82,13 +82,19 @@ enum Listing {
     Failed(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Notice {
+    Problem(String),
+    Info(String),
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Browser {
     places: Vec<Place>,
     place: Option<usize>,
     listings: BTreeMap<PathBuf, Listing>,
     open: BTreeSet<PathBuf>,
-    notice: Option<String>,
+    notice: Option<Notice>,
     pressed: Option<PathBuf>,
     dragged: bool,
     previewing: Option<PathBuf>,
@@ -165,8 +171,16 @@ impl Browser {
         self.listings.insert(folder, listing);
     }
 
-    pub fn set_notice(&mut self, notice: Option<String>) {
-        self.notice = notice;
+    pub fn show_problem(&mut self, problem: String) {
+        self.notice = Some(Notice::Problem(problem));
+    }
+
+    pub fn show_info(&mut self, info: String) {
+        self.notice = Some(Notice::Info(info));
+    }
+
+    pub fn clear_notice(&mut self) {
+        self.notice = None;
     }
 
     fn list(&mut self, folder: PathBuf) -> Option<Request> {
@@ -209,7 +223,11 @@ pub fn view(browser: &Browser, palette: Palette) -> Element<'_, Event> {
     ]
     .spacing(SPACING * 2.0);
     if let Some(notice) = &browser.notice {
-        content = content.push(text(notice).size(TEXT_SIZE).color(palette.record));
+        let (message, color) = match notice {
+            Notice::Problem(message) => (message, palette.record),
+            Notice::Info(message) => (message, palette.text),
+        };
+        content = content.push(text(message).size(TEXT_SIZE).color(color));
     }
     content.into()
 }
@@ -324,12 +342,14 @@ fn icon<'a>(icon: Icon, color: Color) -> Element<'a, Event> {
 mod tests {
     use std::path::{Path, PathBuf};
 
+    use iced::Size;
     use iced_test::simulator;
     use sibilant_media::{Entry, EntryKind, Place};
 
     use crate::browser::{self, Browser, Event, Request};
     use crate::icons::Icon;
-    use crate::theme::Palette;
+    use crate::pixels::Pixels;
+    use crate::theme::{Color, Palette};
 
     fn music() -> PathBuf {
         Path::new("home").join("Music")
@@ -567,11 +587,51 @@ mod tests {
         assert!(ui.find("No audio files").is_ok());
     }
 
+    fn shows(browser: &Browser, notice: &str) -> bool {
+        simulator(browser::view(browser, Palette::GRAPHITE))
+            .find(notice)
+            .is_ok()
+    }
+
     #[test]
-    fn the_browser_shows_its_notice() {
+    fn the_browser_shows_its_newest_notice_until_it_is_cleared() {
         let mut browser = music_listed();
-        browser.set_notice(Some("kick.wav: not a WAV file".into()));
-        let mut ui = simulator(browser::view(&browser, Palette::GRAPHITE));
-        assert!(ui.find("kick.wav: not a WAV file").is_ok());
+        browser.show_problem("kick.wav: not a WAV file".into());
+        assert!(shows(&browser, "kick.wav: not a WAV file"));
+        browser.show_info("Exported MySong.wav".into());
+        assert!(shows(&browser, "Exported MySong.wav"));
+        assert!(!shows(&browser, "kick.wav: not a WAV file"));
+        browser.clear_notice();
+        assert!(!shows(&browser, "Exported MySong.wav"));
+    }
+
+    fn notice_line_colors(browser: &Browser) -> Vec<Color> {
+        let pixels = &Pixels::render(
+            browser::view(browser, Palette::GRAPHITE),
+            Size::new(240.0, 300.0),
+        );
+        (286..298)
+            .flat_map(|y| (0..240).map(move |x| pixels.color_at(x, y)))
+            .collect()
+    }
+
+    fn is_red(color: Color) -> bool {
+        color.red() > color.green().saturating_add(0x60)
+    }
+
+    #[test]
+    fn a_problem_shows_in_the_record_color() {
+        let mut browser = music_listed();
+        browser.show_problem("kick.wav: not a WAV file".into());
+        assert!(notice_line_colors(&browser).into_iter().any(is_red));
+    }
+
+    #[test]
+    fn a_notice_that_is_not_a_problem_shows_in_the_text_color() {
+        let mut browser = music_listed();
+        browser.show_info("Exported MySong.wav".into());
+        let colors = notice_line_colors(&browser);
+        assert!(!colors.iter().copied().any(is_red));
+        assert!(colors.iter().any(|color| color.green() > 0xD0));
     }
 }

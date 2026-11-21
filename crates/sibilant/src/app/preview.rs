@@ -57,7 +57,7 @@ impl App {
                 }
             }
             Err(message) => {
-                self.browser.set_notice(Some(message));
+                self.browser.show_problem(message);
                 if wanted {
                     self.stop_preview();
                 }

@@ -187,7 +187,7 @@ impl App {
             Message::Listed(folder, result) => self.browser.listed(folder, result),
             Message::Loaded(document, ..) if document != self.document.id() => {}
             Message::Loaded(_, placement, Ok(loaded)) => self.place(placement, loaded),
-            Message::Loaded(.., Err(message)) => self.browser.set_notice(Some(message)),
+            Message::Loaded(.., Err(message)) => self.browser.show_problem(message),
             Message::PreviewLoaded(file, result) => self.preview_loaded(file, result),
             Message::SaveAs(Some(chosen)) => return self.save_to(Target::Chosen(chosen)),
             Message::SaveAs(None) => self.waiting = None,
@@ -266,7 +266,7 @@ impl App {
             }
             Err(error) => self
                 .browser
-                .set_notice(Some(format!("{}: {error}", loaded.name))),
+                .show_problem(format!("{}: {error}", loaded.name)),
         }
     }
 
@@ -297,7 +297,7 @@ impl App {
             }
             Some(Request::Drag(file)) => {
                 self.dragging = Some(file);
-                self.browser.set_notice(None);
+                self.browser.clear_notice();
                 Task::none()
             }
             Some(Request::Preview(file)) => self.start_preview(file),

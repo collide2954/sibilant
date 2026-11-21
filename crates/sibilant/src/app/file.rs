@@ -106,7 +106,7 @@ impl App {
             Err(error) => {
                 self.waiting = None;
                 self.browser
-                    .set_notice(Some(format!("Sibilant did not save the project: {error}")));
+                    .show_problem(format!("Sibilant did not save the project: {error}"));
             }
         }
         self.resume_leaving()
@@ -121,7 +121,7 @@ impl App {
             }
             Err(error) => {
                 self.browser
-                    .set_notice(Some(format!("Sibilant did not open the project: {error}")));
+                    .show_problem(format!("Sibilant did not open the project: {error}"));
                 Task::none()
             }
         }
@@ -144,10 +144,10 @@ impl App {
             self.missing
                 .extend(file_name(self.history.present(), source));
             let names: Vec<&str> = self.missing.iter().map(String::as_str).collect();
-            self.browser.set_notice(Some(format!(
+            self.browser.show_problem(format!(
                 "These audio files are missing or damaged: {}",
                 names.join(", ")
-            )));
+            ));
         }
     }
 
@@ -169,7 +169,7 @@ impl App {
         self.selection.clear();
         self.gesture = None;
         self.preview = None;
-        self.browser.set_notice(None);
+        self.browser.clear_notice();
         self.send(engine::Command::Stop);
         self.locate(Position::START);
         self.sync();
