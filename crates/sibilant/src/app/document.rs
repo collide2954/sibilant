@@ -21,6 +21,7 @@ pub(super) struct Document {
     id: DocumentId,
     location: Option<Location>,
     saved: Project,
+    copied: Option<Project>,
     copies: Copies,
 }
 
@@ -30,6 +31,7 @@ impl Document {
             id: DocumentId::unique(),
             location,
             saved: project.clone(),
+            copied: None,
             copies: Copies::default(),
         }
     }
@@ -54,6 +56,15 @@ impl Document {
 
     pub(super) fn is_changed(&self, present: &Project) -> bool {
         *present != self.saved
+    }
+
+    pub(super) fn needs_copy(&self, present: &Project) -> bool {
+        self.is_changed(present) && self.copied.as_ref() != Some(present)
+    }
+
+    pub(super) fn copied(&mut self, project: Project, copies: Copies) {
+        self.copied = Some(project);
+        self.copies = copies;
     }
 
     pub(super) fn title(&self, present: &Project) -> String {

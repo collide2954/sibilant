@@ -4,11 +4,11 @@ use iced::Task;
 use sibilant_core::history::History;
 use sibilant_core::project::{Ids, Project, SourceId};
 use sibilant_engine::engine;
-use sibilant_project::{Copies, Location, Opened, SaveError};
+use sibilant_project::{Copies, Location, Opened, SaveError, SessionFolder};
 use sibilant_ui::timeline::Viewport;
 
 use super::document::{Document, DocumentId};
-use super::{App, Message, dialogs};
+use super::{App, Message, Writing, dialogs};
 use crate::audio::Audio;
 use crate::library::{self, LoadedAudio};
 
@@ -35,12 +35,16 @@ pub(crate) fn write(
     project: &Project,
     target: Target,
     copies: &Copies,
+    session: Option<&SessionFolder>,
 ) -> Result<Saved, SaveError> {
     let location = match target {
         Target::Current(location) => location,
         Target::Chosen(chosen) => Location::for_save_as(&chosen)?,
     };
     let copies = sibilant_project::save(project, &location, copies)?;
+    if let Some(session) = session {
+        let _ = session.clear_untitled();
+    }
     Ok(Saved { location, copies })
 }
 
@@ -64,16 +68,22 @@ impl App {
     }
 
     pub(super) fn save_to(&mut self, target: Target) -> Task<Message> {
-        if self.saving {
-            return Task::none();
+        match self.writing {
+            Some(Writing::Save) => return Task::none(),
+            Some(Writing::Autosave) => {
+                self.queued_save = Some(target);
+                return Task::none();
+            }
+            None => self.writing = Some(Writing::Save),
         }
-        self.saving = true;
         let document = self.document.id();
         let project = self.history.present().clone();
         let copies = self.document.copies().clone();
+        let session = self.recovery.folder();
         Task::perform(
             async move {
-                let result = write(&project, target, &copies).map_err(|error| error.to_string());
+                let result = write(&project, target, &copies, session.as_ref())
+                    .map_err(|error| error.to_string());
                 Box::new(Saving {
                     document,
                     project,
@@ -85,7 +95,7 @@ impl App {
     }
 
     pub(super) fn finish_saving(&mut self, saving: Saving) -> Task<Message> {
-        self.saving = false;
+        self.writing = None;
         match saving.result {
             Ok(saved) if saving.document == self.document.id() => {
                 self.document
@@ -144,6 +154,7 @@ impl App {
     }
 
     fn start_document(&mut self, project: Project, location: Option<Location>) {
+        self.recovery.end();
         self.ids = Ids::after(&project);
         self.document = Document::new(&project, location);
         self.history = History::new(project);
@@ -180,8 +191,9 @@ mod tests {
 
     use sibilant_core::project::{AudioSource, Project, SourceId};
     use sibilant_core::time::Duration;
-    use sibilant_project::Copies;
+    use sibilant_project::{Copies, Session};
 
+    use crate::app::autosave;
     use crate::app::file::{Target, write};
     use crate::library::tests::write_tone;
 
@@ -191,15 +203,43 @@ mod tests {
         let chosen = kick.with_file_name("Saved Song.sibilant");
         let source = AudioSource::new(SourceId::new(1), &kick, Duration::from_seconds(1));
         let project = Project::default().add_source(source).unwrap();
-        let saved = write(&project, Target::Chosen(chosen), &Copies::default()).unwrap();
+        let saved = write(&project, Target::Chosen(chosen), &Copies::default(), None).unwrap();
         assert_eq!(saved.location.name(), "Saved Song");
         assert!(saved.location.audio().join("file-kick.wav").exists());
         let again = write(
             &project,
             Target::Current(saved.location.clone()),
             &saved.copies,
+            None,
         );
         fs::remove_dir_all(saved.location.folder()).unwrap();
         assert_eq!(again, Ok(saved));
+    }
+
+    #[test]
+    fn write_removes_the_recovery_copies_of_an_untitled_project() {
+        let kick = write_tone("file-untitled-kick.wav", 48_000, 480);
+        let session = Session::start(&kick.with_file_name("file-recovery")).unwrap();
+        let source = AudioSource::new(SourceId::new(1), &kick, Duration::from_seconds(1));
+        let project = Project::default().add_source(source).unwrap();
+        let copy = autosave::write(&project, None, &Copies::default(), session.folder(), 7);
+        let chosen = kick.with_file_name("Untitled Song.sibilant");
+        let saved = write(
+            &project,
+            Target::Chosen(chosen),
+            &copy.unwrap().copies,
+            Some(session.folder()),
+        )
+        .unwrap();
+        let untitled = session.folder().untitled();
+        let gone = !untitled.autosave().exists() && !untitled.audio().exists();
+        let copied = saved
+            .location
+            .audio()
+            .join("file-untitled-kick.wav")
+            .exists();
+        session.end().unwrap();
+        fs::remove_dir_all(saved.location.folder()).unwrap();
+        assert!(gone && copied);
     }
 }

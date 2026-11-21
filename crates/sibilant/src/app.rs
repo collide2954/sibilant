@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -25,12 +26,15 @@ use sibilant_ui::{shell, track_area};
 use crate::audio::Audio;
 use crate::library::{self, LoadedAudio};
 
+mod autosave;
 mod dialogs;
 mod document;
 mod file;
 mod preview;
+mod ticks;
 mod unsaved;
 
+use autosave::{Copying, Recovery};
 use document::{Document, DocumentId};
 use file::{Saving, Target};
 use preview::Previews;
@@ -52,6 +56,8 @@ pub(crate) enum Message {
     PreviewLoaded(PathBuf, Result<LoadedAudio, String>),
     SaveAs(Option<PathBuf>),
     Saved(Box<Saving>),
+    Autosave,
+    Autosaved(Box<Copying>),
     OpenFrom(Option<PathBuf>),
     Opened(Box<Result<Opened, String>>),
     SourceLoaded(DocumentId, SourceId, Result<LoadedAudio, String>),
@@ -78,9 +84,17 @@ pub(crate) struct App {
     audio: Option<Audio>,
     metronome: bool,
     playing: bool,
-    saving: bool,
+    writing: Option<Writing>,
+    queued_save: Option<Target>,
+    recovery: Recovery,
     overlay: Option<Overlay>,
     waiting: Option<Leave>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Writing {
+    Save,
+    Autosave,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,7 +122,9 @@ impl Default for App {
             audio: None,
             metronome: false,
             playing: false,
-            saving: false,
+            writing: None,
+            queued_save: None,
+            recovery: Recovery::default(),
             overlay: None,
             waiting: None,
         }
@@ -118,6 +134,7 @@ impl Default for App {
 impl App {
     pub(crate) fn with_audio() -> (Self, Task<Message>) {
         let (mut app, task) = Self::boot();
+        app.recovery = Recovery::at(autosave::recovery_folder(|name| env::var_os(name)));
         match Audio::start(app.history.present()) {
             Ok(audio) => app.attach_audio(audio),
             Err(error) => eprintln!("audio output is not available: {error}"),
@@ -151,6 +168,8 @@ impl App {
             Message::SaveAs(Some(chosen)) => return self.save_to(Target::Chosen(chosen)),
             Message::SaveAs(None) => self.waiting = None,
             Message::Saved(saving) => return self.finish_saving(*saving),
+            Message::Autosave => return self.autosave(),
+            Message::Autosaved(copying) => return self.finish_autosave(*copying),
             Message::OpenFrom(Some(file)) => return file::open(file),
             Message::OpenFrom(None) => {}
             Message::Opened(result) => return self.finish_opening(*result),
@@ -275,10 +294,18 @@ impl App {
             .is_some()
             .then(|| event::listen_with(release_that_no_track_takes));
         let close_requests = window::close_requests().map(Message::CloseRequested);
+        let copies = (self.recovery.is_on() && self.document.needs_copy(self.history.present()))
+            .then(|| ticks::every(autosave::INTERVAL).map(|()| Message::Autosave));
         Subscription::batch(
-            [Some(shortcuts), Some(close_requests), frames, drag_end]
-                .into_iter()
-                .flatten(),
+            [
+                Some(shortcuts),
+                Some(close_requests),
+                frames,
+                drag_end,
+                copies,
+            ]
+            .into_iter()
+            .flatten(),
         )
     }
 
@@ -456,9 +483,13 @@ mod tests {
     use sibilant_ui::timeline::Viewport;
 
     use crate::app::file::{Saved, Saving};
-    use crate::app::{App, Message, Placement, release_that_no_track_takes};
+    use crate::app::{App, Message, Placement, Writing, release_that_no_track_takes};
     use crate::audio::Audio;
     use crate::library::LoadedAudio;
+
+    fn saving(app: &App) -> bool {
+        app.writing == Some(Writing::Save)
+    }
 
     fn project(app: &App) -> &Project {
         app.history.present()
@@ -1180,14 +1211,14 @@ mod tests {
             location: Location::of_file(Path::new("Other").join("Other.sibilant")),
             copies: Copies::default(),
         };
-        let saving = Saving {
+        let late = Saving {
             document: older,
             project: present,
             result: Ok(saved),
         };
-        let _ = app.update(Message::Saved(Box::new(saving)));
+        let _ = app.update(Message::Saved(Box::new(late)));
         assert_eq!(app.title(), "MySong — Sibilant");
-        assert!(!app.saving);
+        assert!(!saving(&app));
     }
 
     fn my_song_saved() -> Saved {
@@ -1254,7 +1285,7 @@ mod tests {
         let _ = answer(&mut app, Choice::DontSave);
         assert_eq!(track_names(&app).len(), 2);
         assert!(!asks_to_save(&app, "Untitled"));
-        assert!(!app.saving);
+        assert!(!saving(&app));
     }
 
     #[test]
@@ -1275,7 +1306,7 @@ mod tests {
         run(&mut app, Command::New);
         assert!(asks_to_save(&app, "MySong"));
         assert_eq!(answer(&mut app, Choice::Save).units(), 1);
-        assert!(app.saving);
+        assert!(saving(&app));
         let present = project(&app).clone();
         saved_as_my_song(&mut app, present);
         assert_eq!(track_names(&app), ["Audio 1", "Audio 2"]);
@@ -1286,7 +1317,7 @@ mod tests {
         let mut app = with_unsaved_changes();
         run(&mut app, Command::Open);
         assert_eq!(answer(&mut app, Choice::Save).units(), 1);
-        assert!(!app.saving);
+        assert!(!saving(&app));
         let _ = app.update(Message::SaveAs(Some(my_song())));
         let present = project(&app).clone();
         let open_dialog = finish_saving(&mut app, present, Ok(my_song_saved()));
@@ -1374,35 +1405,35 @@ mod tests {
         let _ = open_my_song(&mut app);
         run(&mut app, Command::New);
         assert_eq!(app.update(Message::Command(Command::Save)).units(), 1);
-        assert!(!app.saving);
+        assert!(!saving(&app));
     }
 
     #[test]
     fn save_of_a_project_without_a_file_asks_where_to_save_it() {
         let mut app = App::default();
         assert_eq!(app.update(Message::Command(Command::Save)).units(), 1);
-        assert!(!app.saving);
+        assert!(!saving(&app));
     }
 
     #[test]
     fn save_as_asks_where_to_save_the_project() {
         let mut app = App::default();
         assert_eq!(app.update(Message::Command(Command::SaveAs)).units(), 1);
-        assert!(!app.saving);
+        assert!(!saving(&app));
     }
 
     #[test]
     fn a_chosen_file_saves_the_project_in_the_background() {
         let mut app = App::default();
         assert_eq!(app.update(Message::SaveAs(Some(my_song()))).units(), 1);
-        assert!(app.saving);
+        assert!(saving(&app));
     }
 
     #[test]
     fn a_closed_save_dialog_saves_nothing() {
         let mut app = App::default();
         assert_eq!(app.update(Message::SaveAs(None)).units(), 0);
-        assert!(!app.saving);
+        assert!(!saving(&app));
     }
 
     #[test]
@@ -1412,7 +1443,7 @@ mod tests {
         saved_as_my_song(&mut app, present);
         assert_eq!(app.title(), "MySong — Sibilant");
         assert_eq!(app.update(Message::Command(Command::Save)).units(), 1);
-        assert!(app.saving);
+        assert!(saving(&app));
     }
 
     #[test]
@@ -1423,7 +1454,7 @@ mod tests {
         run(&mut app, Command::AddTrack);
         saved_as_my_song(&mut app, at_start);
         assert_eq!(app.title(), "● MySong — Sibilant");
-        assert!(!app.saving);
+        assert!(!saving(&app));
     }
 
     #[test]
@@ -1445,7 +1476,7 @@ mod tests {
         );
         let notice = "Sibilant did not save the project: cannot write the project file";
         assert!(simulator(app.view()).find(notice).is_ok());
-        assert!(!app.saving);
+        assert!(!saving(&app));
     }
 
     #[test]

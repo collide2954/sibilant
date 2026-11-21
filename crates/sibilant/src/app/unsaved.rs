@@ -13,7 +13,7 @@ pub(crate) enum Leave {
 
 impl App {
     pub(super) fn leave(&mut self, leave: Leave) -> Task<Message> {
-        if self.saving {
+        if self.writing.is_some() {
             self.waiting = Some(leave);
             Task::none()
         } else if self.document.is_changed(self.history.present()) {
@@ -61,7 +61,10 @@ impl App {
                 Task::none()
             }
             Leave::Open => dialogs::open_file().map(Message::OpenFrom),
-            Leave::Close(window) => window::close(window),
+            Leave::Close(window) => {
+                self.recovery.end();
+                window::close(window)
+            }
         }
     }
 }
