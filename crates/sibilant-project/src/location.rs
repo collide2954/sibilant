@@ -4,6 +4,7 @@ use crate::SaveError;
 
 pub const EXTENSION: &str = "sibilant";
 pub(crate) const AUDIO: &str = "audio";
+const AUTOSAVE: &str = "autosave";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Location {
@@ -40,6 +41,10 @@ impl Location {
 
     pub fn audio(&self) -> PathBuf {
         self.folder().join(AUDIO)
+    }
+
+    pub fn autosave(&self) -> PathBuf {
+        self.folder().join(AUTOSAVE)
     }
 
     pub fn name(&self) -> String {

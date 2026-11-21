@@ -13,10 +13,14 @@ pub struct Opened {
 }
 
 pub fn open(file: &Path) -> Result<Opened, OpenError> {
-    let text = fs::read_to_string(file).map_err(|error| OpenError::File(error.to_string()))?;
     let location = Location::of_file(file);
-    let project = format::read(&text, |stored| location.resolve(stored))?;
+    let project = read_project(file, &location)?;
     Ok(Opened { project, location })
+}
+
+pub(crate) fn read_project(file: &Path, location: &Location) -> Result<Project, OpenError> {
+    let text = fs::read_to_string(file).map_err(|error| OpenError::File(error.to_string()))?;
+    format::read(&text, |stored| location.resolve(stored))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -14,6 +14,15 @@ use crate::location::AUDIO;
 pub struct Copies(BTreeMap<PathBuf, PathBuf>);
 
 pub fn save(project: &Project, location: &Location, copies: &Copies) -> Result<Copies, SaveError> {
+    write_project(project, location, copies, location.file())
+}
+
+pub(crate) fn write_project(
+    project: &Project,
+    location: &Location,
+    copies: &Copies,
+    file: &Path,
+) -> Result<Copies, SaveError> {
     fs::create_dir_all(location.audio()).map_err(|error| SaveError::Folder(error.to_string()))?;
     let mut copies = copies.clone();
     let files = project
@@ -21,7 +30,7 @@ pub fn save(project: &Project, location: &Location, copies: &Copies) -> Result<C
         .map(|source| Ok((source.id(), copies.file_of(source.path(), location)?)))
         .collect::<Result<BTreeMap<_, _>, SaveError>>()?;
     let text = format::write(project, |source| files[&source.id()].clone());
-    write_through_temporary(location.file(), |temporary| fs::write(temporary, &text))
+    write_through_temporary(file, |temporary| fs::write(temporary, &text))
         .map_err(|error| SaveError::Write(error.to_string()))?;
     Ok(copies)
 }
