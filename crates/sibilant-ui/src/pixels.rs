@@ -63,6 +63,15 @@ impl Pixels {
         Self { width, rgba }
     }
 
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "a point in a test window is a small positive number"
+    )]
+    pub(crate) fn color_near(&self, point: Point) -> Color {
+        self.color_at(point.x as usize, point.y as usize)
+    }
+
     pub(crate) fn color_at(&self, x: usize, y: usize) -> Color {
         let start = (y * self.width + x) * SCALE * 4;
         let [red, green, blue] = [0, 1, 2].map(|channel| self.rgba[start + channel]);

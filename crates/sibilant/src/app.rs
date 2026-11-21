@@ -309,7 +309,7 @@ impl App {
                 self.send(engine::Command::SetPreviewGain(gain));
                 Task::none()
             }
-            None => Task::none(),
+            Some(Request::Stop) | None => Task::none(),
         }
     }
 

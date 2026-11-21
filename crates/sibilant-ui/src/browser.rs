@@ -2,8 +2,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ops::RangeInclusive;
 use std::path::{Path, PathBuf};
 
-use iced::widget::{button, column, container, mouse_area, row, scrollable, slider, space, text};
-use iced::{Alignment, Element, Length, mouse};
+use iced::widget::{
+    button, column, container, mouse_area, progress_bar, row, scrollable, slider, space, text,
+};
+use iced::{Alignment, Border, Element, Length, mouse};
 use sibilant_media::{Entry, EntryKind, Place};
 
 use crate::fonts;
@@ -20,6 +22,7 @@ const VOLUME_RANGE: RangeInclusive<f32> = -60.0..=0.0;
 const VOLUME_STEP: f32 = 0.5;
 const START_VOLUME: f32 = -6.0;
 const VOLUME_LABEL_WIDTH: f32 = 64.0;
+const PROGRESS_GIRTH: f32 = 6.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Volume(f32);
@@ -64,6 +67,7 @@ pub enum Event {
     Leave(PathBuf),
     Release(PathBuf),
     Volume(f32),
+    Stop,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -73,6 +77,13 @@ pub enum Request {
     Preview(PathBuf),
     StopPreview,
     Volume(f32),
+    Stop,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Progress {
+    pub task: String,
+    pub done: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -95,6 +106,7 @@ pub struct Browser {
     listings: BTreeMap<PathBuf, Listing>,
     open: BTreeSet<PathBuf>,
     notice: Option<Notice>,
+    progress: Option<Progress>,
     pressed: Option<PathBuf>,
     dragged: bool,
     previewing: Option<PathBuf>,
@@ -156,7 +168,12 @@ impl Browser {
                 self.volume = Volume::new(*db);
                 Some(Request::Volume(self.volume.gain()))
             }
+            Event::Stop => Some(Request::Stop),
         }
+    }
+
+    pub fn set_progress(&mut self, progress: Option<Progress>) {
+        self.progress = progress;
     }
 
     pub fn set_previewing(&mut self, file: Option<PathBuf>) {
@@ -229,7 +246,34 @@ pub fn view(browser: &Browser, palette: Palette) -> Element<'_, Event> {
         };
         content = content.push(text(message).size(TEXT_SIZE).color(color));
     }
+    if let Some(progress) = &browser.progress {
+        content = content.push(progress_line(progress, palette));
+    }
     content.into()
+}
+
+fn progress_line(progress: &Progress, palette: Palette) -> Element<'_, Event> {
+    let bar = progress_bar(0.0..=1.0, progress.done)
+        .girth(PROGRESS_GIRTH)
+        .style(move |_| progress_bar::Style {
+            background: iced::Color::from(palette.raised).into(),
+            bar: iced::Color::from(palette.accent).into(),
+            border: Border::default().rounded(PROGRESS_GIRTH / 2.0),
+        });
+    let stop = button(text("Cancel").size(TEXT_SIZE))
+        .on_press(Event::Stop)
+        .padding(ROW_PADDING)
+        .style(move |_, status| quiet(palette, status));
+    column![
+        text(&progress.task)
+            .size(TEXT_SIZE)
+            .color(palette.text_muted),
+        row![bar, stop]
+            .spacing(SPACING * 2.0)
+            .align_y(Alignment::Center)
+    ]
+    .spacing(SPACING)
+    .into()
 }
 
 fn volume<'a>(volume: Volume, palette: Palette) -> Element<'a, Event> {
@@ -342,11 +386,11 @@ fn icon<'a>(icon: Icon, color: Color) -> Element<'a, Event> {
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use iced::Size;
-    use iced_test::simulator;
+    use iced::{Point, Settings, Size};
+    use iced_test::{Simulator, simulator};
     use sibilant_media::{Entry, EntryKind, Place};
 
-    use crate::browser::{self, Browser, Event, Request};
+    use crate::browser::{self, Browser, Event, Progress, Request};
     use crate::icons::Icon;
     use crate::pixels::Pixels;
     use crate::theme::{Color, Palette};
@@ -633,5 +677,50 @@ mod tests {
         let colors = notice_line_colors(&browser);
         assert!(!colors.iter().copied().any(is_red));
         assert!(colors.iter().any(|color| color.green() > 0xD0));
+    }
+
+    fn exporting() -> Browser {
+        let mut browser = music_listed();
+        browser.set_progress(Some(Progress {
+            task: "Exporting MySong.wav".into(),
+            done: 0.5,
+        }));
+        browser
+    }
+
+    #[test]
+    fn a_task_in_progress_shows_its_name_and_a_cancel_button_that_asks_to_stop_it() {
+        let mut browser = exporting();
+        assert!(shows(&browser, "Exporting MySong.wav"));
+        assert_eq!(clicks(&browser, "Cancel"), [Event::Stop]);
+        assert_eq!(browser.update(&Event::Stop), Some(Request::Stop));
+        browser.set_progress(None);
+        assert!(!shows(&browser, "Exporting MySong.wav"));
+        assert!(!shows(&browser, "Cancel"));
+    }
+
+    #[test]
+    fn the_progress_bar_fills_the_part_that_is_done() {
+        let browser = exporting();
+        let size = Size::new(240.0, 300.0);
+        let view = browser::view(&browser, Palette::GRAPHITE);
+        let cancel = Simulator::with_size(Settings::default(), size, view)
+            .find("Cancel")
+            .unwrap()
+            .bounds();
+        let pixels = Pixels::render(browser::view(&browser, Palette::GRAPHITE), size);
+        let at = |share: f32| pixels.color_near(Point::new(cancel.x * share, cancel.center_y()));
+        assert_eq!(at(0.25), Palette::GRAPHITE.accent);
+        assert_eq!(at(0.75), Palette::GRAPHITE.raised);
+    }
+
+    #[test]
+    fn the_progress_shows_below_the_notice() {
+        let mut browser = exporting();
+        browser.show_problem("kick.wav: not a WAV file".into());
+        let mut ui = simulator(browser::view(&browser, Palette::GRAPHITE));
+        let notice = ui.find("kick.wav: not a WAV file").unwrap().bounds();
+        let task = ui.find("Exporting MySong.wav").unwrap().bounds();
+        assert!(notice.y < task.y);
     }
 }
