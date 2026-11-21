@@ -18,6 +18,7 @@ use sibilant_ui::browser::{self, Browser, Request};
 use sibilant_ui::command::Command;
 use sibilant_ui::dialog::{self, Choice, RestoreChoice};
 use sibilant_ui::menu;
+use sibilant_ui::mixer::{self, Meters};
 use sibilant_ui::theme::Palette;
 use sibilant_ui::timeline::{View, Viewport, Waveforms};
 use sibilant_ui::transport::{self, Display};
@@ -99,6 +100,7 @@ pub(crate) struct App {
     selection: BTreeSet<ClipKey>,
     gesture: Option<Gesture>,
     preview: Option<Preview>,
+    meters: Meters,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -142,6 +144,7 @@ impl Default for App {
             selection: BTreeSet::new(),
             gesture: None,
             preview: None,
+            meters: Meters::default(),
         }
     }
 }
@@ -448,7 +451,8 @@ impl App {
         let tracks = track_area::view(self.shown().0, timeline, self.palette).map(Message::Command);
         let open = self.overlay == Some(Overlay::FileMenu);
         let file = menu::file_button(open, self.palette).map(Message::Menu);
-        let window = shell::view(self.palette, file, transport, browser, tracks);
+        let mixer = mixer::view(self.shown().0, &self.meters, self.palette).map(Message::Command);
+        let window = shell::view(self.palette, file, transport, browser, tracks, mixer);
         match self.overlay {
             None => window,
             Some(Overlay::FileMenu) => {
@@ -1576,7 +1580,15 @@ mod tests {
     fn the_app_shows_the_zones_of_the_main_window() {
         let app = App::default();
         let mut ui = simulator(app.view());
-        for zone in ["File", "1.1.1", "Browser", "Audio 1", "Inspector", "Mixer"] {
+        for zone in [
+            "File",
+            "1.1.1",
+            "Browser",
+            "Audio 1",
+            "Inspector",
+            "Mixer",
+            "Master",
+        ] {
             assert!(ui.find(zone).is_ok(), "{zone}");
         }
     }

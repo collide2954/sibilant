@@ -1,9 +1,9 @@
 use iced::widget::{button, column, container, row, scrollable, space, text};
-use iced::{Alignment, Border, Element, Length};
+use iced::{Alignment, Element, Length};
 use sibilant_core::project::{Clip, Project, Track};
 
 use crate::command::Command;
-use crate::style::{filled, quiet};
+use crate::style::{filled, quiet, toggle};
 use crate::theme::{Color, Palette};
 use crate::timeline::{RULER_HEIGHT, View, lane, new_track_lane, ruler};
 
@@ -16,9 +16,7 @@ const DIVIDER: f32 = 1.0;
 const PADDING: f32 = 8.0;
 const TEXT_SIZE: f32 = 13.0;
 const SMALL_TEXT_SIZE: f32 = 11.0;
-const TOGGLE_SIZE: f32 = 20.0;
 const TOGGLE_SPACING: f32 = 4.0;
-const RADIUS: f32 = 4.0;
 
 pub fn view<'a>(
     project: &'a Project,
@@ -110,37 +108,6 @@ fn header(track: &Track, palette: Palette) -> Element<'_, Command> {
         .width(HEADER_WIDTH)
         .height(Length::Fill)
         .style(move |_| filled(palette.raised))
-        .into()
-}
-
-fn toggle(
-    label: &'static str,
-    on: bool,
-    on_color: Color,
-    command: Command,
-    palette: Palette,
-) -> Element<'static, Command> {
-    let (background, foreground) = if on {
-        (on_color, palette.on_accent)
-    } else {
-        (palette.surface, palette.text_muted)
-    };
-    let label = text(label)
-        .size(SMALL_TEXT_SIZE)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .center();
-    button(label)
-        .on_press(command)
-        .width(TOGGLE_SIZE)
-        .height(TOGGLE_SIZE)
-        .padding(0)
-        .style(move |_, _| button::Style {
-            background: Some(iced::Color::from(background).into()),
-            text_color: foreground.into(),
-            border: Border::default().rounded(RADIUS),
-            ..button::Style::default()
-        })
         .into()
 }
 

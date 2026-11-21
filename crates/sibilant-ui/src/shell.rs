@@ -23,6 +23,7 @@ pub fn view<'a, Message: 'a>(
     transport: impl Into<Element<'a, Message>>,
     browser: impl Into<Element<'a, Message>>,
     tracks: impl Into<Element<'a, Message>>,
+    mixer: impl Into<Element<'a, Message>>,
 ) -> Element<'a, Message> {
     let top = row![menu.into(), transport.into()]
         .spacing(MENU_SPACING)
@@ -38,7 +39,11 @@ pub fn view<'a, Message: 'a>(
         .style(move |_| filled(palette.background));
     let inspector = zone(palette.surface, label(palette, "Inspector")).width(INSPECTOR_WIDTH);
     let tabs = row![label(palette, "Mixer"), label(palette, "Clip editor")].spacing(TAB_SPACING);
-    let bottom = zone(palette.surface, tabs).height(BOTTOM_HEIGHT);
+    let bottom = zone(
+        palette.surface,
+        column![tabs, mixer.into()].spacing(ZONE_SPACING),
+    )
+    .height(BOTTOM_HEIGHT);
     let middle = row![browser, tracks, inspector]
         .spacing(DIVIDER)
         .height(Length::Fill);
@@ -92,7 +97,16 @@ mod tests {
             text("Transport"),
             text("Places"),
             text("Tracks"),
+            text("Strips"),
         )
+    }
+
+    #[test]
+    fn the_mixer_shows_below_its_tab() {
+        let mut ui = simulator(shell::<()>());
+        let tab = ui.find("Mixer").unwrap().bounds();
+        let strips = ui.find("Strips").unwrap().bounds();
+        assert!(tab.y < strips.y);
     }
 
     #[test]
