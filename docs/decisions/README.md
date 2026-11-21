@@ -55,3 +55,4 @@ To change a decision, write a new record. Then change the status of the old reco
 | [0038](0038-project-file-in-a-project-folder.md) | Save each project as a .sibilant file in a project folder |
 | [0039](0039-autosave-recovery-copies.md) | Write recovery copies automatically and offer them after a crash |
 | [0040](0040-edit-clips-on-the-timeline.md) | Edit clips on the timeline with the mouse and with shortcuts |
+| [0041](0041-mixer-strips-faders-and-meters.md) | Mix in channel strips with tapered faders and peak meters |
