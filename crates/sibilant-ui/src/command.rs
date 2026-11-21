@@ -15,6 +15,7 @@ pub enum Command {
         track: Option<TrackId>,
         start: Position<Musical>,
     },
+    Locate(Position<Musical>),
     New,
     Open,
     PlayOrStop,

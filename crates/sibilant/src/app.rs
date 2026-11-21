@@ -88,6 +88,7 @@ pub(crate) struct App {
     audio: Option<Audio>,
     metronome: bool,
     playing: bool,
+    play_start: Position<Musical>,
     writing: Option<Writing>,
     queued_save: Option<Target>,
     recovery: Recovery,
@@ -127,6 +128,7 @@ impl Default for App {
             audio: None,
             metronome: false,
             playing: false,
+            play_start: Position::START,
             writing: None,
             queued_save: None,
             recovery: Recovery::default(),
@@ -358,6 +360,7 @@ impl App {
             Command::Save => return self.save(),
             Command::SaveAs => return self.save_as(),
             Command::Cancel if self.overlay == Some(Overlay::FileMenu) => self.overlay = None,
+            Command::Locate(position) => self.locate(position),
             Command::Cancel => self.stop_preview(),
             Command::Confirm => {}
         }
@@ -389,6 +392,11 @@ impl App {
         }
     }
 
+    fn locate(&mut self, position: Position<Musical>) {
+        self.play_start = position;
+        self.send(engine::Command::Locate(position));
+    }
+
     pub(crate) fn view(&self) -> Element<'_, Message> {
         let project = self.history.present();
         let clock = self.audio.as_ref().map_or(Position::START, Audio::playhead);
@@ -406,6 +414,7 @@ impl App {
         let timeline = View {
             viewport: self.viewport,
             playhead: position,
+            play_start: self.play_start,
             waveforms: &self.waveforms,
             dragging: self.dragging.is_some(),
         };
@@ -967,6 +976,29 @@ mod tests {
 
     fn engine_is_playing(app: &App) -> bool {
         app.audio.as_ref().unwrap().controller.is_playing()
+    }
+
+    fn engine_playhead(app: &App) -> i64 {
+        app.audio.as_ref().unwrap().controller.playhead()
+    }
+
+    #[test]
+    fn a_click_on_the_ruler_moves_where_playback_starts() {
+        let (mut app, mut engine) = with_simulated_audio();
+        run(&mut app, Command::Locate(Position::from_quarter_notes(4)));
+        run(&mut app, Command::PlayOrStop);
+        let _ = render(&mut engine, 480);
+        assert_eq!(engine_playhead(&app), 96_480);
+    }
+
+    #[test]
+    fn an_opened_project_plays_from_bar_1() {
+        let (mut app, mut engine) = with_simulated_audio();
+        run(&mut app, Command::Locate(Position::from_quarter_notes(4)));
+        let _ = open_my_song(&mut app);
+        run(&mut app, Command::PlayOrStop);
+        let _ = render(&mut engine, 480);
+        assert_eq!(engine_playhead(&app), 480);
     }
 
     #[test]

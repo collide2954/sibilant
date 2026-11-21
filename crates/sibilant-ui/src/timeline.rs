@@ -11,7 +11,7 @@ use iced::keyboard::{self, Modifiers};
 use iced::widget::canvas::{Action, Event, Frame};
 use iced::{Point, Rectangle, Size, mouse};
 use sibilant_core::project::SourceId;
-use sibilant_core::time::{Duration, Musical, Position, TICKS_PER_QUARTER_NOTE};
+use sibilant_core::time::{Duration, Musical, Position, TICKS_PER_QUARTER_NOTE, TimeSignatureMap};
 use sibilant_media::Peaks;
 
 use crate::command::Command;
@@ -51,6 +51,7 @@ static NO_WAVEFORMS: Waveforms = BTreeMap::new();
 pub struct View<'a> {
     pub viewport: Viewport,
     pub playhead: Position<Musical>,
+    pub play_start: Position<Musical>,
     pub waveforms: &'a Waveforms,
     pub dragging: bool,
 }
@@ -60,9 +61,23 @@ impl Default for View<'_> {
         Self {
             viewport: Viewport::default(),
             playhead: Position::START,
+            play_start: Position::START,
             waveforms: &NO_WAVEFORMS,
             dragging: false,
         }
+    }
+}
+
+fn pointed(
+    viewport: Viewport,
+    time_signatures: &TimeSignatureMap,
+    x: f32,
+    modifiers: Modifiers,
+) -> Position<Musical> {
+    if modifiers.alt() {
+        viewport.position_at(x).max(Position::START)
+    } else {
+        viewport.snap(x, time_signatures)
     }
 }
 

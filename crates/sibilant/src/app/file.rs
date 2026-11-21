@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use iced::Task;
 use sibilant_core::history::History;
 use sibilant_core::project::{Ids, Project, SourceId};
+use sibilant_core::time::Position;
 use sibilant_engine::engine;
 use sibilant_project::{Copies, Location, Opened, SaveError, SessionFolder};
 use sibilant_ui::timeline::Viewport;
@@ -167,6 +168,7 @@ impl App {
         self.missing.clear();
         self.browser.set_notice(None);
         self.send(engine::Command::Stop);
+        self.locate(Position::START);
         self.sync();
     }
 
