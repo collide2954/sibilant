@@ -8,6 +8,7 @@ const WHEEL_LINE: f32 = 48.0;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Command {
     AddTrack,
+    Cancel,
     Continue,
     Drop {
         track: Option<TrackId>,
@@ -19,7 +20,6 @@ pub enum Command {
     Redo,
     Save,
     SaveAs,
-    StopPreview,
     ScrollTimeline {
         pixels: f32,
     },
@@ -75,7 +75,7 @@ impl Command {
             Key::Character(character) if modifiers.command() => {
                 Self::from_command_character(character, modifiers.shift())
             }
-            Key::Named(key::Named::Escape) => Some(Self::StopPreview),
+            Key::Named(key::Named::Escape) => Some(Self::Cancel),
             _ => None,
         }
     }
@@ -173,11 +173,11 @@ mod tests {
     }
 
     #[test]
-    fn escape_stops_the_preview() {
+    fn escape_cancels() {
         let escape = Key::Named(key::Named::Escape);
         assert_eq!(
             Command::from_shortcut(&escape, Modifiers::empty()),
-            Some(Command::StopPreview)
+            Some(Command::Cancel)
         );
     }
 

@@ -293,7 +293,7 @@ impl App {
             Command::Open => return dialogs::open_file().map(Message::OpenFrom),
             Command::Save => return self.save(),
             Command::SaveAs => return self.save_as(),
-            Command::StopPreview => self.stop_preview(),
+            Command::Cancel => self.stop_preview(),
         }
         Task::none()
     }
@@ -564,7 +564,7 @@ mod tests {
     fn a_preview_stopped_before_it_loaded_does_not_play() {
         let (mut app, mut engine) = with_simulated_audio();
         let _ = click(&mut app, kick());
-        run(&mut app, Command::StopPreview);
+        run(&mut app, Command::Cancel);
         let _ = app.update(Message::PreviewLoaded(
             kick(),
             Ok(audio_file(kick(), 48_000)),
@@ -588,7 +588,7 @@ mod tests {
         let (mut app, mut engine) = with_simulated_audio();
         hear_kick(&mut app, 48_000);
         let _ = render(&mut engine, 480);
-        run(&mut app, Command::StopPreview);
+        run(&mut app, Command::Cancel);
         assert_eq!(loudest(&render(&mut engine, 480)[400..]), 0.0);
     }
 
