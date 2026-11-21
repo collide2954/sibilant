@@ -107,11 +107,16 @@ pub struct Orphan {
     folder: SessionFolder,
     project: Option<Location>,
     copy: Option<PathBuf>,
+    written: Option<SystemTime>,
 }
 
 impl Orphan {
     pub fn copy(&self) -> Option<&Path> {
         self.copy.as_deref()
+    }
+
+    pub fn written(&self) -> Option<SystemTime> {
+        self.written
     }
 
     pub fn project(&self) -> Option<&Location> {
@@ -159,23 +164,28 @@ fn read_orphan(folder: PathBuf) -> Orphan {
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default();
     let project = note.project.map(Location::of_file);
+    let (copy, written) = note
+        .copy
+        .and_then(|copy| {
+            let written = written_after_the_project(&copy, project.as_ref())?;
+            Some((copy, written))
+        })
+        .unzip();
     Orphan {
-        copy: note
-            .copy
-            .filter(|copy| is_newer_than_the_project(copy, project.as_ref())),
-        project,
         folder: SessionFolder(folder),
+        project,
+        copy,
+        written,
     }
 }
 
-fn is_newer_than_the_project(copy: &Path, project: Option<&Location>) -> bool {
+fn written_after_the_project(copy: &Path, project: Option<&Location>) -> Option<SystemTime> {
     let modified = |file: &Path| fs::metadata(file).and_then(|file| file.modified()).ok();
-    let Some(copied) = modified(copy) else {
-        return false;
-    };
+    let written = modified(copy)?;
     project
         .and_then(|location| modified(location.file()))
-        .is_none_or(|saved| copied > saved)
+        .is_none_or(|saved| written > saved)
+        .then_some(written)
 }
 
 #[cfg(test)]
@@ -256,6 +266,22 @@ mod tests {
         session.folder().note(Some(&location), Some(&copy)).unwrap();
         drop(session);
         orphans(&root)[0].copy().map(Path::to_path_buf)
+    }
+
+    #[test]
+    fn an_orphan_gives_the_time_of_its_copy() {
+        let scratch = Scratch::new();
+        let copy = scratch.file("MySong/autosave/MySong 7.sibilant", b"{}");
+        set_modified(&copy, 1_795_100_000);
+        let root = scratch.path().join("Recovery");
+        let session = Session::start(&root).unwrap();
+        session
+            .folder()
+            .note(Some(&my_song(&scratch)), Some(&copy))
+            .unwrap();
+        drop(session);
+        let written = UNIX_EPOCH + Interval::from_secs(1_795_100_000);
+        assert_eq!(orphans(&root)[0].written(), Some(written));
     }
 
     #[test]
