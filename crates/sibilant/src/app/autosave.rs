@@ -1,10 +1,11 @@
 use std::ffi::OsString;
+use std::io;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use iced::Task;
 use sibilant_core::project::Project;
-use sibilant_project::{Autosaved, Copies, Location, Session, SessionFolder};
+use sibilant_project::{Autosaved, Copies, Location, Orphan, Session, SessionFolder};
 
 use super::document::DocumentId;
 use super::{App, Message, Writing};
@@ -15,14 +16,45 @@ pub(super) const INTERVAL: Duration = Duration::from_secs(120);
 pub(super) struct Recovery {
     root: Option<PathBuf>,
     session: Option<Session>,
+    orphans: Vec<Orphan>,
 }
 
 impl Recovery {
     pub(super) fn at(root: Option<PathBuf>) -> Self {
         Self {
             root,
-            session: None,
+            ..Self::default()
         }
+    }
+
+    pub(super) fn find_orphans(&mut self) {
+        let Some(root) = &self.root else {
+            return;
+        };
+        let (restorable, empty): (Vec<_>, Vec<_>) = sibilant_project::orphans(root)
+            .into_iter()
+            .partition(|orphan| orphan.copy().is_some());
+        for orphan in empty {
+            let _ = orphan.discard();
+        }
+        self.orphans = restorable;
+    }
+
+    pub(super) fn next_orphan(&self) -> Option<&Orphan> {
+        self.orphans.first()
+    }
+
+    pub(super) fn take_orphan(&mut self) -> Option<Orphan> {
+        (!self.orphans.is_empty()).then(|| self.orphans.remove(0))
+    }
+
+    pub(super) fn forget_orphans(&mut self) {
+        self.orphans.clear();
+    }
+
+    pub(super) fn adopt(&mut self, orphan: Orphan) -> io::Result<()> {
+        self.session = Some(orphan.adopt()?);
+        Ok(())
     }
 
     pub(super) fn is_on(&self) -> bool {
@@ -214,8 +246,6 @@ mod tests {
 #[cfg(test)]
 mod flow {
     use std::path::PathBuf;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::{env, fs, process};
 
     use iced::Task;
     use iced_test::simulator;
@@ -226,37 +256,9 @@ mod flow {
     use sibilant_ui::dialog::Choice;
 
     use crate::app::autosave::{Copying, Recovery, write};
+    use crate::app::scratch::Folder;
     use crate::app::{App, Message, Writing};
     use crate::library::tests::write_tone;
-
-    struct Folder(PathBuf);
-
-    impl Folder {
-        fn new() -> Self {
-            static FOLDERS: AtomicUsize = AtomicUsize::new(0);
-            let path = env::temp_dir().join(format!(
-                "sibilant-autosave-{}-{}",
-                process::id(),
-                FOLDERS.fetch_add(1, Ordering::Relaxed)
-            ));
-            fs::create_dir_all(&path).unwrap();
-            Self(path)
-        }
-
-        fn recovery(&self) -> PathBuf {
-            self.0.join("Recovery")
-        }
-
-        fn sessions(&self) -> usize {
-            fs::read_dir(self.recovery()).map_or(0, Iterator::count)
-        }
-    }
-
-    impl Drop for Folder {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
 
     fn recovering(folder: &Folder) -> App {
         App {
@@ -321,7 +323,7 @@ mod flow {
     #[test]
     fn write_puts_the_copy_of_a_saved_project_into_its_autosave_folder() {
         let folder = Folder::new();
-        let location = Location::of_file(folder.0.join("MySong").join("MySong.sibilant"));
+        let location = Location::of_file(folder.path().join("MySong").join("MySong.sibilant"));
         let session = Session::start(&folder.recovery()).unwrap();
         let written = write(
             &Project::default(),
@@ -386,7 +388,7 @@ mod flow {
         let mut app = recovering(&folder);
         change(&mut app);
         let _ = tick(&mut app);
-        let chosen = Message::SaveAs(Some(folder.0.join("MySong.sibilant")));
+        let chosen = Message::SaveAs(Some(folder.path().join("MySong.sibilant")));
         assert_eq!(app.update(chosen).units(), 0);
         assert_eq!(copied(&mut app, Ok(autosaved())).units(), 1);
         assert_eq!(app.writing, Some(Writing::Save));
@@ -397,7 +399,7 @@ mod flow {
         let folder = Folder::new();
         let mut app = recovering(&folder);
         change(&mut app);
-        let _ = app.update(Message::SaveAs(Some(folder.0.join("MySong.sibilant"))));
+        let _ = app.update(Message::SaveAs(Some(folder.path().join("MySong.sibilant"))));
         assert_eq!(tick(&mut app).units(), 0);
         assert_eq!(app.writing, Some(Writing::Save));
     }
@@ -435,13 +437,13 @@ mod flow {
         let older = app.document.id();
         let opened = Opened {
             project: Project::default(),
-            location: Location::of_file(folder.0.join("Other").join("Other.sibilant")),
+            location: Location::of_file(folder.path().join("Other").join("Other.sibilant")),
         };
         let _ = app.update(Message::Opened(Box::new(Ok(opened))));
         let kick = write_tone("autosave-kick.wav", 48_000, 480);
         let source = AudioSource::new(SourceId::new(1), &kick, Duration::from_seconds(1));
         let project = Project::default().add_source(source).unwrap();
-        let elsewhere = Session::start(&folder.0.join("Elsewhere")).unwrap();
+        let elsewhere = Session::start(&folder.path().join("Elsewhere")).unwrap();
         let written = write(&project, None, &Copies::default(), elsewhere.folder(), 7);
         let copying = Copying {
             document: older,

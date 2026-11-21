@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use sibilant_core::project::Project;
 use sibilant_project::{Copies, Location};
 
-const UNTITLED: &str = "Untitled";
+pub(super) const UNTITLED: &str = "Untitled";
 const CHANGED: &str = "● ";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,7 +20,7 @@ impl DocumentId {
 pub(super) struct Document {
     id: DocumentId,
     location: Option<Location>,
-    saved: Project,
+    saved: Option<Project>,
     copied: Option<Project>,
     copies: Copies,
 }
@@ -28,9 +28,16 @@ pub(super) struct Document {
 impl Document {
     pub(super) fn new(project: &Project, location: Option<Location>) -> Self {
         Self {
+            saved: Some(project.clone()),
+            ..Self::restored(location)
+        }
+    }
+
+    pub(super) fn restored(location: Option<Location>) -> Self {
+        Self {
             id: DocumentId::unique(),
             location,
-            saved: project.clone(),
+            saved: None,
             copied: None,
             copies: Copies::default(),
         }
@@ -55,7 +62,7 @@ impl Document {
     }
 
     pub(super) fn is_changed(&self, present: &Project) -> bool {
-        *present != self.saved
+        self.saved.as_ref() != Some(present)
     }
 
     pub(super) fn needs_copy(&self, present: &Project) -> bool {
@@ -77,7 +84,7 @@ impl Document {
     }
 
     pub(super) fn saved(&mut self, project: Project, location: Location, copies: Copies) {
-        self.saved = project;
+        self.saved = Some(project);
         self.location = Some(location);
         self.copies = copies;
     }

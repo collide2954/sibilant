@@ -16,7 +16,7 @@ use sibilant_media::{Entry, Place};
 use sibilant_project::Opened;
 use sibilant_ui::browser::{self, Browser, Request};
 use sibilant_ui::command::Command;
-use sibilant_ui::dialog::{self, Choice};
+use sibilant_ui::dialog::{self, Choice, RestoreChoice};
 use sibilant_ui::menu;
 use sibilant_ui::theme::Palette;
 use sibilant_ui::timeline::{View, Viewport, Waveforms};
@@ -31,6 +31,9 @@ mod dialogs;
 mod document;
 mod file;
 mod preview;
+mod restore;
+#[cfg(test)]
+mod scratch;
 mod ticks;
 mod unsaved;
 
@@ -62,6 +65,7 @@ pub(crate) enum Message {
     Opened(Box<Result<Opened, String>>),
     SourceLoaded(DocumentId, SourceId, Result<LoadedAudio, String>),
     Unsaved(Choice),
+    Restore(RestoreChoice),
     CloseRequested(window::Id),
     Menu(menu::Event),
     DragEnded,
@@ -101,6 +105,7 @@ enum Writing {
 enum Overlay {
     FileMenu,
     Unsaved(Leave),
+    Restore,
 }
 
 impl Default for App {
@@ -134,7 +139,7 @@ impl Default for App {
 impl App {
     pub(crate) fn with_audio() -> (Self, Task<Message>) {
         let (mut app, task) = Self::boot();
-        app.recovery = Recovery::at(autosave::recovery_folder(|name| env::var_os(name)));
+        app.start_recovery(autosave::recovery_folder(|name| env::var_os(name)));
         match Audio::start(app.history.present()) {
             Ok(audio) => app.attach_audio(audio),
             Err(error) => eprintln!("audio output is not available: {error}"),
@@ -177,6 +182,7 @@ impl App {
                 self.source_loaded(document, source, result);
             }
             Message::Unsaved(choice) => return self.answer(choice),
+            Message::Restore(choice) => return self.answer_restore(choice),
             Message::CloseRequested(window) => return self.leave(Leave::Close(window)),
             Message::Menu(event) => return self.use_menu(event),
             Message::DragEnded => self.dragging = None,
@@ -310,8 +316,10 @@ impl App {
     }
 
     fn run(&mut self, command: Command) -> Task<Message> {
-        if let Some(Overlay::Unsaved(_)) = self.overlay {
-            return self.answer_by_key(command);
+        match self.overlay {
+            Some(Overlay::Unsaved(_)) => return self.answer_by_key(command),
+            Some(Overlay::Restore) => return self.restore_by_key(command),
+            Some(Overlay::FileMenu) | None => {}
         }
         match command {
             Command::AddTrack => {
@@ -416,6 +424,13 @@ impl App {
                     .map(Message::Unsaved);
                 dialog::modal(window, question, self.palette)
             }
+            Some(Overlay::Restore) => match self.offered_copy() {
+                Some((name, age)) => {
+                    let offer = dialog::restore(&name, age, self.palette).map(Message::Restore);
+                    dialog::modal(window, offer, self.palette)
+                }
+                None => window,
+            },
         }
     }
 

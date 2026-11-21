@@ -114,7 +114,8 @@ impl App {
     pub(super) fn finish_opening(&mut self, result: Result<Opened, String>) -> Task<Message> {
         match result {
             Ok(opened) => {
-                self.start_document(opened.project, Some(opened.location));
+                let document = Document::new(&opened.project, Some(opened.location));
+                self.start_document(opened.project, document);
                 self.load_sources()
             }
             Err(error) => {
@@ -150,13 +151,15 @@ impl App {
     }
 
     pub(super) fn start_new_project(&mut self) {
-        self.start_document(Project::new(&mut Ids::default()), None);
+        let project = Project::new(&mut Ids::default());
+        let document = Document::new(&project, None);
+        self.start_document(project, document);
     }
 
-    fn start_document(&mut self, project: Project, location: Option<Location>) {
+    pub(super) fn start_document(&mut self, project: Project, document: Document) {
         self.recovery.end();
         self.ids = Ids::after(&project);
-        self.document = Document::new(&project, location);
+        self.document = document;
         self.history = History::new(project);
         self.viewport = Viewport::default();
         self.pool.clear();
@@ -167,7 +170,7 @@ impl App {
         self.sync();
     }
 
-    fn load_sources(&self) -> Task<Message> {
+    pub(super) fn load_sources(&self) -> Task<Message> {
         let document = self.document.id();
         let sample_rate = self.audio.as_ref().map(Audio::sample_rate);
         Task::batch(self.history.present().sources().map(|source| {
