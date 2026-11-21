@@ -16,6 +16,7 @@ const PREVIEW_CAPACITY: usize = 16;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Command {
     Continue,
+    Locate(Position<Musical>),
     SetMetronome(bool),
     SetPreviewGain(f32),
     Stop,
@@ -211,6 +212,12 @@ impl Engine {
                 self.playing = true;
             }
             Command::Continue => {}
+            Command::Locate(position) => {
+                self.marker = position;
+                let frame = self.arrangement.timing().frame_of(position);
+                self.stopped_at = frame;
+                self.playhead = frame;
+            }
             Command::Stop => {
                 self.stopped_at = marker;
                 self.playhead = marker;
@@ -263,7 +270,7 @@ mod tests {
     use std::sync::Arc;
 
     use assert_no_alloc::assert_no_alloc;
-    use sibilant_core::time::{TempoMap, TimeSignatureMap};
+    use sibilant_core::time::{Musical, Position, TempoMap, TimeSignatureMap};
 
     use crate::arrangement::{Arrangement, AudioBuffer, ClipPlayback, TrackPlayback};
     use crate::engine::{self, ARRANGEMENT_CAPACITY, Command, Controller, Engine};
@@ -403,6 +410,47 @@ mod tests {
         controller.send(Command::Continue);
         let _ = run(&mut engine, 500);
         assert_eq!(controller.playhead(), 500);
+    }
+
+    fn quarter_notes(quarter_notes: i64) -> Position<Musical> {
+        Position::from_quarter_notes(quarter_notes)
+    }
+
+    #[test]
+    fn locate_moves_the_play_start() {
+        let (mut controller, mut engine) = engine();
+        controller.send(Command::Locate(quarter_notes(1)));
+        controller.send(Command::TogglePlay);
+        let _ = run(&mut engine, 100);
+        assert_eq!(controller.playhead(), 24_100);
+        controller.send(Command::TogglePlay);
+        let _ = run(&mut engine, 10);
+        assert_eq!(controller.playhead(), 24_000);
+    }
+
+    #[test]
+    fn locate_during_playback_plays_on_from_the_new_position() {
+        let (mut controller, mut engine) = engine();
+        controller.send(Command::TogglePlay);
+        let _ = run(&mut engine, 1_000);
+        controller.send(Command::Locate(quarter_notes(2)));
+        let _ = run(&mut engine, 100);
+        assert!(controller.is_playing());
+        assert_eq!(controller.playhead(), 48_100);
+    }
+
+    #[test]
+    fn locate_while_stopped_moves_the_playhead_and_the_continue_point() {
+        let (mut controller, mut engine) = engine();
+        controller.send(Command::TogglePlay);
+        let _ = run(&mut engine, 1_000);
+        controller.send(Command::TogglePlay);
+        controller.send(Command::Locate(quarter_notes(1)));
+        let _ = run(&mut engine, 10);
+        assert_eq!(controller.playhead(), 24_000);
+        controller.send(Command::Continue);
+        let _ = run(&mut engine, 100);
+        assert_eq!(controller.playhead(), 24_100);
     }
 
     #[test]
