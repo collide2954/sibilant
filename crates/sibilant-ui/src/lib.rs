@@ -3,6 +3,7 @@ pub mod command;
 pub mod dialog;
 pub mod fonts;
 pub mod icons;
+pub mod menu;
 #[cfg(test)]
 mod pixels;
 pub mod shell;
