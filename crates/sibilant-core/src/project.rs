@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::mix::Gain;
-use crate::time::{TempoMap, TimeSignatureMap};
+use crate::time::{Quantize, TempoMap, TimeSignatureMap};
 
 pub use clip::{Clip, Region};
 pub use edit_error::EditError;
@@ -33,6 +33,7 @@ pub struct Project {
     scenes: Vec<Arc<Scene>>,
     tracks: Vec<Arc<Track>>,
     master_gain: Gain,
+    launch_quantize: Quantize,
 }
 
 const NEW_TRACKS: usize = 2;

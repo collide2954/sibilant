@@ -1,8 +1,21 @@
 use std::sync::Arc;
 
 use super::{Clip, EditError, Project, SceneId, TrackId};
+use crate::time::Quantize;
 
 impl Project {
+    pub fn launch_quantize(&self) -> Quantize {
+        self.launch_quantize
+    }
+
+    #[must_use]
+    pub fn with_launch_quantize(&self, launch_quantize: Quantize) -> Self {
+        Self {
+            launch_quantize,
+            ..self.clone()
+        }
+    }
+
     pub fn put_clip_in_slot(
         &self,
         track: TrackId,
@@ -27,9 +40,9 @@ impl Project {
 #[cfg(test)]
 mod tests {
     use crate::project::{
-        AudioSource, Clip, EditError, Project, Region, SceneId, SourceId, TrackId,
+        AudioSource, Clip, EditError, Ids, Project, Region, SceneId, SourceId, TrackId,
     };
-    use crate::time::{Clock, Duration};
+    use crate::time::{Clock, Duration, Quantize};
 
     const TRACK: TrackId = TrackId::new(1);
     const INTRO: SceneId = SceneId::new(1);
@@ -64,6 +77,18 @@ mod tests {
     #[test]
     fn a_new_track_has_empty_slots() {
         assert!(slot(&project(), INTRO).is_none());
+    }
+
+    #[test]
+    fn a_new_project_starts_launcher_clips_at_the_next_bar() {
+        let project = Project::new(&mut Ids::default());
+        assert_eq!(project.launch_quantize(), Quantize::Bar);
+    }
+
+    #[test]
+    fn a_project_takes_a_new_launch_quantize() {
+        let project = project().with_launch_quantize(Quantize::FourBars);
+        assert_eq!(project.launch_quantize(), Quantize::FourBars);
     }
 
     #[test]
