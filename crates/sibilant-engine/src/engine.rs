@@ -260,7 +260,7 @@ impl Engine {
 
 fn mix_clips(arrangement: &Arrangement, output: &mut [f32], channels: usize, start: i64, end: i64) {
     let master = arrangement.master();
-    for track in arrangement.tracks() {
+    for track in arrangement.tracks().iter().filter(|track| track.heard) {
         let mut peak = 0.0_f32;
         let first = track.clips.partition_point(|clip| clip.end <= start);
         for clip in track.clips[first..]
@@ -309,6 +309,7 @@ mod tests {
     use std::sync::Arc;
 
     use assert_no_alloc::assert_no_alloc;
+    use sibilant_core::project::TrackId;
     use sibilant_core::time::{Musical, Position, TempoMap, TimeSignatureMap};
 
     use crate::arrangement::{Arrangement, AudioBuffer, ClipPlayback, TrackPlayback};
@@ -339,10 +340,23 @@ mod tests {
 
     fn track_at(meter: usize, gains: [f32; 2], clip: ClipPlayback) -> TrackPlayback {
         TrackPlayback {
+            id: TrackId::new(u64::try_from(meter).unwrap() + 1),
+            heard: true,
             gains,
             meter,
             clips: vec![clip],
+            slots: Vec::new(),
         }
+    }
+
+    #[test]
+    fn a_track_that_is_not_heard_plays_nothing() {
+        let silent = TrackPlayback {
+            heard: false,
+            ..track([1.0, 1.0], clip(0, 100, 0, 1, vec![vec![0.5; 100]]))
+        };
+        let mut engine = playing(vec![silent]);
+        assert_eq!(peak(&run(&mut engine, 100)), 0.0);
     }
 
     fn two_tracks() -> Engine {

@@ -66,9 +66,12 @@ mod tests {
             audio: Arc::new(AudioBuffer::new(vec![vec![value; frames]])),
         };
         let track = TrackPlayback {
+            id: TrackId::new(1),
+            heard: true,
             gains: [1.0, 1.0],
             meter: 0,
             clips: vec![clip],
+            slots: Vec::new(),
         };
         Arrangement::new(timing, vec![track])
     }

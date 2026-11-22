@@ -1,7 +1,8 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
-use sibilant_core::project::{Project, SourceId, Track, TrackId};
+use sibilant_core::project::{Project, SceneId, SourceId, Track, TrackId};
+use sibilant_core::time::Quantize;
 
 use crate::timing::Timing;
 
@@ -63,10 +64,22 @@ pub struct ClipPlayback {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct SlotPlayback {
+    pub scene: SceneId,
+    pub offset: i64,
+    pub length: i64,
+    pub fade: i64,
+    pub audio: Arc<AudioBuffer>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct TrackPlayback {
+    pub id: TrackId,
+    pub heard: bool,
     pub gains: [f32; 2],
     pub meter: usize,
     pub clips: Vec<ClipPlayback>,
+    pub slots: Vec<SlotPlayback>,
 }
 
 #[derive(Debug, Clone)]
@@ -74,6 +87,7 @@ pub struct Arrangement {
     timing: Timing,
     tracks: Vec<TrackPlayback>,
     master: f32,
+    quantize: Quantize,
     meters: Arc<[AtomicU32]>,
 }
 
@@ -88,6 +102,7 @@ impl Arrangement {
             timing,
             tracks,
             master: 1.0,
+            quantize: Quantize::default(),
             meters: silent(meters),
         }
     }
@@ -95,6 +110,11 @@ impl Arrangement {
     #[must_use]
     pub fn with_master(self, master: f32) -> Self {
         Self { master, ..self }
+    }
+
+    #[must_use]
+    pub fn with_quantize(self, quantize: Quantize) -> Self {
+        Self { quantize, ..self }
     }
 
     pub fn of_project(
@@ -111,15 +131,17 @@ impl Arrangement {
         let tracks = project
             .tracks()
             .enumerate()
-            .filter(|(_, track)| heard.contains(&track.id()))
             .map(|(meter, track)| {
                 let mix = track.mix();
                 let gain = mix.gain.amplitude();
                 let pan = mix.pan.channel_gains();
                 TrackPlayback {
+                    id: track.id(),
+                    heard: heard.contains(&track.id()),
                     gains: [to_f32(gain * pan.left), to_f32(gain * pan.right)],
                     meter,
                     clips: clips(&timing, track, &audio),
+                    slots: slots(&timing, track, &audio),
                 }
             })
             .collect();
@@ -127,12 +149,17 @@ impl Arrangement {
             timing,
             tracks,
             master: to_f32(project.master_gain().amplitude()),
+            quantize: project.launch_quantize(),
             meters: silent(project.tracks().len()),
         }
     }
 
     pub fn timing(&self) -> &Timing {
         &self.timing
+    }
+
+    pub fn quantize(&self) -> Quantize {
+        self.quantize
     }
 
     pub fn tracks(&self) -> &[TrackPlayback] {
@@ -162,7 +189,6 @@ fn clips(
     audio: &impl Fn(SourceId) -> Option<Arc<AudioBuffer>>,
 ) -> Vec<ClipPlayback> {
     let timeline: Vec<_> = track.timeline().collect();
-    let fade = i64::from(timing.sample_rate()) * FADE_MILLISECONDS / 1_000;
     timeline
         .iter()
         .enumerate()
@@ -178,11 +204,40 @@ fn clips(
                 start: first,
                 end,
                 offset: clip.region().start.to_frames(timing.sample_rate()),
-                fade: fade.min((end - first) / 2).max(1),
+                fade: fade(timing, end - first),
                 audio,
             })
         })
         .collect()
+}
+
+fn slots(
+    timing: &Timing,
+    track: &Track,
+    audio: &impl Fn(SourceId) -> Option<Arc<AudioBuffer>>,
+) -> Vec<SlotPlayback> {
+    let rate = timing.sample_rate();
+    track
+        .slots()
+        .filter_map(|(scene, clip)| {
+            let length = clip.region().length.to_frames(rate);
+            if length <= 0 {
+                return None;
+            }
+            Some(SlotPlayback {
+                scene,
+                offset: clip.region().start.to_frames(rate),
+                length,
+                fade: fade(timing, length),
+                audio: audio(clip.source())?,
+            })
+        })
+        .collect()
+}
+
+fn fade(timing: &Timing, frames: i64) -> i64 {
+    let fade = i64::from(timing.sample_rate()) * FADE_MILLISECONDS / 1_000;
+    fade.min(frames / 2).max(1)
 }
 
 #[expect(
@@ -206,12 +261,14 @@ mod tests {
     use std::sync::Arc;
 
     use sibilant_core::mix::{Gain, Mix, Pan};
-    use sibilant_core::project::{AudioSource, Clip, Ids, Project, Region, SourceId, TrackId};
+    use sibilant_core::project::{
+        AudioSource, Clip, Ids, Project, Region, SceneId, SourceId, Track, TrackId,
+    };
     use sibilant_core::time::{
-        Clock, Duration, Musical, Position, SUPERCLOCKS_PER_SECOND, Tempo, TempoMap,
+        Clock, Duration, Musical, Position, Quantize, SUPERCLOCKS_PER_SECOND, Tempo, TempoMap,
     };
 
-    use crate::arrangement::{Arrangement, AudioBuffer, ClipPlayback};
+    use crate::arrangement::{Arrangement, AudioBuffer, ClipPlayback, SlotPlayback};
 
     const RATE: u32 = 48_000;
 
@@ -351,28 +408,94 @@ mod tests {
         assert!((master - 10_f32.powf(0.3)).abs() < 1e-6, "master {master}");
     }
 
-    #[test]
-    fn tracks_that_are_not_heard_are_left_out() {
-        let mut session = Session::new(seconds(2));
+    fn muted(mut session: Session) -> Session {
         let muted = Mix {
             mute: true,
             ..Mix::default()
         };
         session.project = session.project.set_mix(session.track, muted).unwrap();
-        assert_eq!(session.arrangement().tracks().len(), 1);
+        session
     }
 
     #[test]
-    fn each_heard_track_meters_into_the_place_of_its_track() {
-        let mut session = Session::new(seconds(2));
-        let muted = Mix {
-            mute: true,
-            ..Mix::default()
-        };
-        session.project = session.project.set_mix(session.track, muted).unwrap();
-        let arrangement = session.arrangement();
-        assert_eq!(arrangement.tracks()[0].meter, 1);
+    fn each_track_keeps_its_id_and_tells_if_it_is_heard() {
+        let session = muted(Session::new(seconds(2)));
+        let tracks: Vec<(TrackId, bool)> = session
+            .arrangement()
+            .tracks()
+            .iter()
+            .map(|track| (track.id, track.heard))
+            .collect();
+        let ids: Vec<TrackId> = session.project.tracks().map(Track::id).collect();
+        assert_eq!(tracks, [(ids[0], false), (ids[1], true)]);
+    }
+
+    #[test]
+    fn each_track_meters_into_the_place_of_its_track() {
+        let arrangement = muted(Session::new(seconds(2))).arrangement();
+        let meters: Vec<usize> = arrangement
+            .tracks()
+            .iter()
+            .map(|track| track.meter)
+            .collect();
+        assert_eq!(meters, [0, 1]);
         assert_eq!(arrangement.meter_count(), 2);
+    }
+
+    fn first_scene(session: &Session) -> SceneId {
+        session.project.scenes().next().unwrap().id()
+    }
+
+    fn with_slot(mut session: Session, region: Region) -> Session {
+        let clip = Clip::new("Loop", session.source, region);
+        let scene = first_scene(&session);
+        session.project = session
+            .project
+            .put_clip_in_slot(session.track, scene, clip)
+            .unwrap();
+        session
+    }
+
+    #[test]
+    fn each_slot_plays_its_region_in_frames_and_fades_for_4_ms() {
+        let region = Region {
+            start: milliseconds(500),
+            length: seconds(1),
+        };
+        let session = with_slot(Session::new(seconds(2)), region);
+        let slots: Vec<(SceneId, i64, i64, i64)> = session.arrangement().tracks()[0]
+            .slots
+            .iter()
+            .map(|slot: &SlotPlayback| (slot.scene, slot.offset, slot.length, slot.fade))
+            .collect();
+        assert_eq!(slots, [(first_scene(&session), 24_000, 48_000, 192)]);
+    }
+
+    #[test]
+    fn a_short_slot_fades_for_half_of_its_length() {
+        let session = with_slot(Session::new(seconds(2)), whole(milliseconds(6)));
+        assert_eq!(session.arrangement().tracks()[0].slots[0].fade, 144);
+    }
+
+    #[test]
+    fn a_slot_shorter_than_one_frame_is_left_out() {
+        let tiny = whole(Duration::from_superclocks(1));
+        let session = with_slot(Session::new(seconds(2)), tiny);
+        assert_eq!(session.arrangement().tracks()[0].slots, []);
+    }
+
+    #[test]
+    fn slots_without_loaded_audio_are_left_out() {
+        let session = with_slot(Session::new(seconds(2)), whole(seconds(1)));
+        let arrangement = Arrangement::of_project(&session.project, RATE, |_| None);
+        assert_eq!(arrangement.tracks()[0].slots, []);
+    }
+
+    #[test]
+    fn the_arrangement_keeps_the_launch_quantize_of_the_project() {
+        let mut session = Session::new(seconds(2));
+        session.project = session.project.with_launch_quantize(Quantize::Beat);
+        assert_eq!(session.arrangement().quantize(), Quantize::Beat);
     }
 
     #[test]
