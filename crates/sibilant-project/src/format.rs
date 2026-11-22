@@ -6,7 +6,9 @@ use sibilant_core::mix::{Gain, Mix, Pan};
 use sibilant_core::project::{
     AudioSource, Clip, Project, Region, SceneId, SourceId, Track, TrackColor, TrackId,
 };
-use sibilant_core::time::{Duration, Position, Tempo, TempoMap, TimeSignature, TimeSignatureMap};
+use sibilant_core::time::{
+    Duration, Position, Quantize, Tempo, TempoMap, TimeSignature, TimeSignatureMap,
+};
 
 use crate::OpenError;
 
@@ -24,9 +26,22 @@ struct ProjectFile {
     time_signatures: Vec<TimeSignatureChange>,
     #[serde(with = "decibels")]
     master_gain_db: f64,
+    #[serde(default)]
+    launch_quantize: QuantizeEntry,
     sources: Vec<SourceEntry>,
     scenes: Vec<SceneEntry>,
     tracks: Vec<TrackEntry>,
+}
+
+#[derive(Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum QuantizeEntry {
+    Off,
+    Beat,
+    #[default]
+    Bar,
+    TwoBars,
+    FourBars,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -122,7 +137,8 @@ impl ProjectFile {
         let project = Project::default()
             .with_tempo_map(tempo_map(&self.tempo)?)
             .with_time_signature_map(time_signature_map(&self.time_signatures)?)
-            .with_master_gain(Gain::from_db(self.master_gain_db)?);
+            .with_master_gain(Gain::from_db(self.master_gain_db)?)
+            .with_launch_quantize(self.launch_quantize.quantize());
         let project = self
             .sources
             .into_iter()
@@ -178,6 +194,28 @@ fn time_signature_map(changes: &[TimeSignatureChange]) -> Result<TimeSignatureMa
 impl TimeSignatureChange {
     fn signature(&self) -> Result<TimeSignature, Invalid> {
         Ok(TimeSignature::new(self.numerator, self.denominator)?)
+    }
+}
+
+impl QuantizeEntry {
+    fn of(quantize: Quantize) -> Self {
+        match quantize {
+            Quantize::Off => Self::Off,
+            Quantize::Beat => Self::Beat,
+            Quantize::Bar => Self::Bar,
+            Quantize::TwoBars => Self::TwoBars,
+            Quantize::FourBars => Self::FourBars,
+        }
+    }
+
+    fn quantize(self) -> Quantize {
+        match self {
+            Self::Off => Quantize::Off,
+            Self::Beat => Quantize::Beat,
+            Self::Bar => Quantize::Bar,
+            Self::TwoBars => Quantize::TwoBars,
+            Self::FourBars => Quantize::FourBars,
+        }
     }
 }
 
@@ -238,6 +276,7 @@ pub(crate) fn write(project: &Project, mut file_of: impl FnMut(&AudioSource) -> 
             })
             .collect(),
         master_gain_db: project.master_gain().db(),
+        launch_quantize: QuantizeEntry::of(project.launch_quantize()),
         sources: project
             .sources()
             .map(|source| SourceEntry {
@@ -342,7 +381,7 @@ mod tests {
     use sibilant_core::mix::{Gain, Mix, Pan};
     use sibilant_core::project::{AudioSource, Clip, Project, Region, SceneId, SourceId, TrackId};
     use sibilant_core::time::{
-        Clock, Duration, Position, Tempo, TempoMap, TimeSignature, TimeSignatureMap,
+        Clock, Duration, Position, Quantize, Tempo, TempoMap, TimeSignature, TimeSignatureMap,
     };
 
     use crate::{OpenError, format};
@@ -376,6 +415,7 @@ mod tests {
             .with_tempo_map(tempo)
             .with_time_signature_map(time_signatures)
             .with_master_gain(Gain::from_db(-3.0).unwrap())
+            .with_launch_quantize(Quantize::TwoBars)
             .add_source(AudioSource::new(
                 KICK,
                 "Kick.wav",
@@ -414,6 +454,7 @@ mod tests {
                 { "bar": 3, "numerator": 3, "denominator": 4 }
             ],
             "master_gain_db": -3.0,
+            "launch_quantize": "two_bars",
             "sources": [{ "id": 1, "file": "audio/Kick.wav", "length": 282_240_000 }],
             "scenes": [{ "id": 2, "name": "Intro" }],
             "tracks": [{
@@ -452,6 +493,30 @@ mod tests {
     fn a_project_survives_the_project_file() {
         let project = project();
         assert_eq!(read_back(&project), Ok(project));
+    }
+
+    #[test]
+    fn each_launch_quantize_survives_the_project_file() {
+        for quantize in [
+            Quantize::Off,
+            Quantize::Beat,
+            Quantize::Bar,
+            Quantize::TwoBars,
+            Quantize::FourBars,
+        ] {
+            let project = Project::default().with_launch_quantize(quantize);
+            assert_eq!(read_back(&project), Ok(project), "{quantize:?}");
+        }
+    }
+
+    #[test]
+    fn an_older_project_file_without_a_launch_quantize_starts_clips_at_the_next_bar() {
+        let older = Project::default().with_launch_quantize(Quantize::Beat);
+        let text = format::write(&older, |_| String::new());
+        let mut file: Value = serde_json::from_str(&text).unwrap();
+        file.as_object_mut().unwrap().remove("launch_quantize");
+        let opened = read_text(&file.to_string()).unwrap();
+        assert_eq!(opened.launch_quantize(), Quantize::Bar);
     }
 
     #[test]
