@@ -57,3 +57,4 @@ To change a decision, write a new record. Then change the status of the old reco
 | [0040](0040-edit-clips-on-the-timeline.md) | Edit clips on the timeline with the mouse and with shortcuts |
 | [0041](0041-mixer-strips-faders-and-meters.md) | Mix in channel strips with tapered faders and peak meters |
 | [0042](0042-export-to-a-wav-file.md) | Export the project to a WAV file in the background |
+| [0043](0043-launch-clips-at-quantized-times.md) | Start and stop launcher clips at quantized times |
