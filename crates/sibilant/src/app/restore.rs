@@ -100,9 +100,9 @@ mod tests {
     use sibilant_ui::command::Command;
     use sibilant_ui::dialog::RestoreChoice;
 
-    use crate::app::scratch::Folder;
     use crate::app::{App, Message, autosave};
     use crate::library::tests::write_tone;
+    use crate::scratch::Folder;
 
     fn left_behind(folder: &Folder, project: &Project, location: Option<&Location>) -> PathBuf {
         let session = Session::start(&folder.recovery()).unwrap();

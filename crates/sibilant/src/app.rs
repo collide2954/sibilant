@@ -18,33 +18,34 @@ use sibilant_project::Opened;
 use sibilant_ui::browser::{self, Browser, Request};
 use sibilant_ui::command::Command;
 use sibilant_ui::dialog::{self, Choice, RestoreChoice};
-use sibilant_ui::menu;
 use sibilant_ui::mixer::{self, Meters};
 use sibilant_ui::theme::Palette;
 use sibilant_ui::timeline::{View, Viewport, Waveforms};
 use sibilant_ui::transport::{self, Display};
+use sibilant_ui::{export, menu};
 use sibilant_ui::{shell, track_area};
 
 use crate::audio::Audio;
 use crate::library::{self, LoadedAudio};
+use crate::mixdown::Report;
 
 mod autosave;
 mod dialogs;
 mod document;
 mod editing;
+mod exporting;
 mod file;
 mod metering;
 mod mixing;
 mod preview;
 mod restore;
-#[cfg(test)]
-mod scratch;
 mod ticks;
 mod unsaved;
 
 use autosave::{Copying, Recovery};
 use document::{Document, DocumentId};
 use editing::{Gesture, Preview};
+use exporting::Exporting;
 use file::{Saving, Target};
 use metering::Metering;
 use preview::Previews;
@@ -73,6 +74,9 @@ pub(crate) enum Message {
     SourceLoaded(DocumentId, SourceId, Result<LoadedAudio, String>),
     Unsaved(Choice),
     Restore(RestoreChoice),
+    Export(export::Event),
+    ExportTo(Option<PathBuf>),
+    Mixdown(Report),
     CloseRequested(window::Id),
     Menu(menu::Event),
     DragEnded,
@@ -106,6 +110,8 @@ pub(crate) struct App {
     preview: Option<Preview>,
     meters: Meters,
     metering: Metering,
+    export_format: export::Format,
+    exporting: Option<Exporting>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,6 +125,7 @@ enum Overlay {
     FileMenu,
     Unsaved(Leave),
     Restore,
+    Export,
 }
 
 impl Default for App {
@@ -151,6 +158,8 @@ impl Default for App {
             preview: None,
             meters: Meters::default(),
             metering: Metering::default(),
+            export_format: export::Format::default(),
+            exporting: None,
         }
     }
 }
@@ -195,13 +204,16 @@ impl App {
             Message::Autosave => return self.autosave(),
             Message::Autosaved(copying) => return self.finish_autosave(*copying),
             Message::OpenFrom(Some(file)) => return file::open(file),
-            Message::OpenFrom(None) => {}
+            Message::OpenFrom(None) | Message::ExportTo(None) => {}
             Message::Opened(result) => return self.finish_opening(*result),
             Message::SourceLoaded(document, source, result) => {
                 self.source_loaded(document, source, result);
             }
             Message::Unsaved(choice) => return self.answer(choice),
             Message::Restore(choice) => return self.answer_restore(choice),
+            Message::Export(event) => return self.choose_export(event),
+            Message::ExportTo(Some(chosen)) => return self.start_export(chosen),
+            Message::Mixdown(report) => self.follow_export(report),
             Message::CloseRequested(window) => return self.leave(Leave::Close(window)),
             Message::Menu(event) => return self.use_menu(event),
             Message::DragEnded => {
@@ -309,7 +321,11 @@ impl App {
                 self.send(engine::Command::SetPreviewGain(gain));
                 Task::none()
             }
-            Some(Request::Stop) | None => Task::none(),
+            Some(Request::Stop) => {
+                self.stop_export();
+                Task::none()
+            }
+            None => Task::none(),
         }
     }
 
@@ -341,6 +357,7 @@ impl App {
         match self.overlay {
             Some(Overlay::Unsaved(_)) => return self.answer_by_key(command),
             Some(Overlay::Restore) => return self.restore_by_key(command),
+            Some(Overlay::Export) => return self.export_by_key(command),
             Some(Overlay::FileMenu) | None => {}
         }
         match command {
@@ -381,6 +398,7 @@ impl App {
             Command::Open => return self.leave(Leave::Open),
             Command::Save => return self.save(),
             Command::SaveAs => return self.save_as(),
+            Command::Export => self.ask_how_to_export(),
             Command::Cancel if self.overlay == Some(Overlay::FileMenu) => self.overlay = None,
             Command::Locate(position) => self.locate(position),
             Command::Pointer(pointer) => self.point(pointer),
@@ -482,6 +500,11 @@ impl App {
                 }
                 None => window,
             },
+            Some(Overlay::Export) => {
+                let ask = export::dialog(&self.document.name(), self.export_format, self.palette)
+                    .map(Message::Export);
+                dialog::modal(window, ask, self.palette)
+            }
         }
     }
 

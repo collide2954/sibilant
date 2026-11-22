@@ -1,11 +1,11 @@
-use std::path::{Path, PathBuf};
+﻿use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{env, fs, process};
 
-pub(super) struct Folder(PathBuf);
+pub(crate) struct Folder(PathBuf);
 
 impl Folder {
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         static FOLDERS: AtomicUsize = AtomicUsize::new(0);
         let path = env::temp_dir().join(format!(
             "sibilant-app-{}-{}",
@@ -16,15 +16,15 @@ impl Folder {
         Self(path)
     }
 
-    pub(super) fn path(&self) -> &Path {
+    pub(crate) fn path(&self) -> &Path {
         &self.0
     }
 
-    pub(super) fn recovery(&self) -> PathBuf {
+    pub(crate) fn recovery(&self) -> PathBuf {
         self.0.join("Recovery")
     }
 
-    pub(super) fn sessions(&self) -> usize {
+    pub(crate) fn sessions(&self) -> usize {
         fs::read_dir(self.recovery()).map_or(0, Iterator::count)
     }
 }

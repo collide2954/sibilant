@@ -1,6 +1,9 @@
 mod app;
 mod audio;
 mod library;
+mod mixdown;
+#[cfg(test)]
+mod scratch;
 
 use app::App;
 use sibilant_ui::{fonts, icons};

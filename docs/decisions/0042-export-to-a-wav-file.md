@@ -14,19 +14,20 @@ Version 0.1 must export the project to a WAV file (record 0002). The user must b
   - The sample rate: 44.1 kHz, 48 kHz, or 96 kHz.
   - The bit depth: 16-bit, 24-bit, or 32-bit float.
 - The first choices are 48 kHz and 24-bit. Sibilant keeps the last choices until it closes.
-- The dialog has the buttons Export and Cancel. The Enter key gives Export, and the Esc key gives Cancel. After Export, the save dialog of the operating system asks for the file. The first name is the name of the project with the extension `.wav`.
+- The dialog has the buttons Export and Cancel. The Enter key gives Export, and the Esc key gives Cancel. After Export, the save dialog of the operating system asks for the file. The first name is the name of the project with the extension `.wav`. If the user types a name without the extension `.wav`, Sibilant adds it.
 - The file contains the project from bar 1 to the end of the last clip. Muted tracks and soloed tracks follow the rules of playback (record 0024). The metronome and the preview are not in the file. If the project has no clips, Sibilant does not make a file and shows a notice.
-- Sibilant makes the audio in the background, faster than real time. When the export rate is different from the rate of the clips in memory (record 0035), Sibilant reads the audio files again at the export rate.
+- Sibilant makes the audio in the background, faster than real time. When the export rate is different from the rate of the clips in memory (record 0035), Sibilant reads the audio files again at the export rate. Sibilant also reads the audio files that are not in memory yet, for example just after it opens a project.
 - 16-bit files get triangular (TPDF) dither. In 16-bit and 24-bit files, Sibilant limits each sample to the range of the format. 32-bit float files keep all values.
 - Sibilant writes the file to a temporary file first. Then it renames the temporary file (record 0038).
-- While the export runs, the notice line of the browser shows a progress bar and a Cancel button. Cancel stops the export and removes the temporary file. The user can continue to work. The export uses the project as it was when the export started.
-- When the export is done, a notice gives the name of the file and the peak level, for example "Exported MySong.wav, peak -1.2 dBFS". If samples were limited, the notice also says that the export clipped.
+- While the export runs, the notice line of the browser shows a progress bar and a Cancel button. Cancel stops the export and removes the temporary file. The user can continue to work. The export uses the project as it was when the export started. Sibilant does not start a second export until the first export stops.
+- When the export starts, Sibilant removes the last notice. When the export is done, a notice gives the name of the file and the peak level, for example "Exported MySong.wav, peak −1.2 dBFS". If samples were limited, the notice is red and also says that the export clipped. If the file is silent, the notice says that the file is silent.
 
 ## Consequences
 
 - The user can share a finished song.
 - An export at a different sample rate takes more time, because Sibilant reads and converts the audio files again.
 - Sibilant does not keep the export choices after it closes. A later version can keep them with the other settings of the user.
+- If the user closes Sibilant while an export runs, the temporary file can stay in the folder of the export. The next export with the same name writes over it.
 
 ## Alternatives
 

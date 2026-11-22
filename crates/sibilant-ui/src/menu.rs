@@ -38,6 +38,13 @@ pub fn file_menu<'a>(palette: Palette) -> Element<'a, Event> {
         divider(palette),
         item("Save", shortcut("S", false), Command::Save, palette),
         item("Save As…", shortcut("S", true), Command::SaveAs, palette),
+        divider(palette),
+        item(
+            "Export Audio…",
+            shortcut("E", true),
+            Command::Export,
+            palette
+        ),
     ];
     container(items)
         .width(WIDTH)
@@ -124,6 +131,7 @@ mod tests {
             ("Open…", Command::Open),
             ("Save", Command::Save),
             ("Save As…", Command::SaveAs),
+            ("Export Audio…", Command::Export),
         ];
         for (label, command) in items {
             let mut ui = simulator(menu::file_menu(Palette::GRAPHITE));
@@ -134,10 +142,10 @@ mod tests {
     }
 
     #[test]
-    fn the_items_read_new_open_save_and_save_as_from_the_top() {
+    fn the_items_read_new_open_save_save_as_and_export_from_the_top() {
         let mut ui = simulator(menu::file_menu(Palette::GRAPHITE));
-        let tops =
-            ["New", "Open…", "Save", "Save As…"].map(|label| ui.find(label).unwrap().bounds().y);
+        let tops = ["New", "Open…", "Save", "Save As…", "Export Audio…"]
+            .map(|label| ui.find(label).unwrap().bounds().y);
         assert!(tops.is_sorted(), "{tops:?}");
     }
 
@@ -145,7 +153,7 @@ mod tests {
     #[test]
     fn the_items_show_their_ctrl_shortcuts() {
         let mut ui = simulator(menu::file_menu(Palette::GRAPHITE));
-        for keys in ["Ctrl+N", "Ctrl+O", "Ctrl+S", "Ctrl+Shift+S"] {
+        for keys in ["Ctrl+N", "Ctrl+O", "Ctrl+S", "Ctrl+Shift+S", "Ctrl+Shift+E"] {
             assert!(ui.find(keys).is_ok(), "{keys}");
         }
     }
@@ -154,7 +162,7 @@ mod tests {
     #[test]
     fn the_items_show_their_cmd_shortcuts() {
         let mut ui = simulator(menu::file_menu(Palette::GRAPHITE));
-        for keys in ["⌘N", "⌘O", "⌘S", "⇧⌘S"] {
+        for keys in ["⌘N", "⌘O", "⌘S", "⇧⌘S", "⇧⌘E"] {
             assert!(ui.find(keys).is_ok(), "{keys}");
         }
     }

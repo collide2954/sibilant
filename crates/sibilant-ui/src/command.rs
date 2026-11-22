@@ -20,6 +20,7 @@ pub enum Command {
         start: Position<Musical>,
     },
     Duplicate,
+    Export,
     Locate(Position<Musical>),
     Mix(Mixing),
     New,
@@ -96,6 +97,7 @@ impl Command {
         match character.to_ascii_lowercase().as_str() {
             "d" if !shift => Some(Self::Duplicate),
             "e" if !shift => Some(Self::Split),
+            "e" => Some(Self::Export),
             "n" if !shift => Some(Self::New),
             "o" if !shift => Some(Self::Open),
             "s" if !shift => Some(Self::Save),
@@ -152,6 +154,13 @@ mod tests {
     fn command_e_splits_and_command_d_duplicates() {
         assert_eq!(press("e", Modifiers::COMMAND), Some(Command::Split));
         assert_eq!(press("d", Modifiers::COMMAND), Some(Command::Duplicate));
+    }
+
+    #[test]
+    fn command_shift_e_exports_the_audio() {
+        let shift = Modifiers::COMMAND | Modifiers::SHIFT;
+        assert_eq!(press("e", shift), Some(Command::Export));
+        assert_eq!(press("E", shift), Some(Command::Export));
     }
 
     #[test]

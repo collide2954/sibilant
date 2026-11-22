@@ -4,10 +4,13 @@ use iced::{Task, window};
 use rfd::AsyncFileDialog;
 use sibilant_project::EXTENSION;
 
-const FILTER: &str = "Sibilant project";
+type Filter = (&'static str, &'static str);
+
+const PROJECT: Filter = ("Sibilant project", EXTENSION);
+const WAV: Filter = ("WAV audio", "wav");
 
 pub(super) fn open_file() -> Task<Option<PathBuf>> {
-    prepare("Open Project", None).then(|dialog| {
+    prepare("Open Project", PROJECT, None).then(|dialog| {
         Task::future(async move {
             dialog
                 .pick_file()
@@ -18,8 +21,16 @@ pub(super) fn open_file() -> Task<Option<PathBuf>> {
 }
 
 pub(super) fn save_file(name: &str) -> Task<Option<PathBuf>> {
-    let file_name = format!("{name}.{EXTENSION}");
-    prepare("Save Project", Some(file_name)).then(|dialog| {
+    save("Save Project", PROJECT, name)
+}
+
+pub(super) fn export_file(name: &str) -> Task<Option<PathBuf>> {
+    save("Export Audio", WAV, name)
+}
+
+fn save(title: &'static str, filter: Filter, name: &str) -> Task<Option<PathBuf>> {
+    let file_name = format!("{name}.{}", filter.1);
+    prepare(title, filter, Some(file_name)).then(|dialog| {
         Task::future(async move {
             dialog
                 .save_file()
@@ -29,11 +40,15 @@ pub(super) fn save_file(name: &str) -> Task<Option<PathBuf>> {
     })
 }
 
-fn prepare(title: &'static str, file_name: Option<String>) -> Task<AsyncFileDialog> {
+fn prepare(
+    title: &'static str,
+    (kind, extension): Filter,
+    file_name: Option<String>,
+) -> Task<AsyncFileDialog> {
     let make = move || {
         let dialog = AsyncFileDialog::new()
             .set_title(title)
-            .add_filter(FILTER, &[EXTENSION]);
+            .add_filter(kind, &[extension]);
         match &file_name {
             Some(name) => dialog.set_file_name(name),
             None => dialog,

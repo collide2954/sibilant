@@ -255,9 +255,9 @@ mod flow {
     use sibilant_ui::dialog::Choice;
 
     use crate::app::autosave::{Copying, Recovery, write};
-    use crate::app::scratch::Folder;
     use crate::app::{App, Message, Writing};
     use crate::library::tests::write_tone;
+    use crate::scratch::Folder;
 
     fn recovering(folder: &Folder) -> App {
         App {
